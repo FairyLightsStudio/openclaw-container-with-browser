@@ -27,7 +27,7 @@ jobs:
           git remote add upstream https://github.com/openclaw/openclaw.git
           git fetch upstream main
           git merge upstream/main --no-edit || {
-            echo "::error::Merge conflict detected. Please resolve manually."
+            echo "::error::Merge conflict with upstream/main. Please pull upstream changes locally, resolve conflicts, and push to main."
             git merge --abort
             exit 1
           }
