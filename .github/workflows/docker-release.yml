@@ -159,6 +159,9 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          build-args: |
+            OPENCLAW_INSTALL_BROWSER=1
+            OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg
           tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.labels.outputs.value }}
           provenance: false
@@ -272,6 +275,9 @@ jobs:
         with:
           context: .
           platforms: linux/arm64
+          build-args: |
+            OPENCLAW_INSTALL_BROWSER=1
+            OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg
           tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.labels.outputs.value }}
           provenance: false

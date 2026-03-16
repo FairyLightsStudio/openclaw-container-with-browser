@@ -1,0 +1,36 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote and merge
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/openclaw/openclaw.git
+          git fetch upstream main
+          git merge upstream/main --no-edit || {
+            echo "::error::Merge conflict with upstream/main. Please pull upstream changes locally, resolve conflicts, and push to main."
+            git merge --abort
+            exit 1
+          }
+
+      - name: Push changes
+        run: git push origin main
