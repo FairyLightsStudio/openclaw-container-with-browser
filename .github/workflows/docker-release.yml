@@ -161,8 +161,7 @@ jobs:
           context: .
           platforms: linux/amd64
           build-args: |
-            OPENCLAW_INSTALL_BROWSER=1
-            OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg
+            OPENCLAW_DOCKER_APT_PACKAGES=chromium xvfb ffmpeg jq sqlite3 openssh-client zip
           tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.labels.outputs.value }}
           provenance: false
@@ -278,8 +277,7 @@ jobs:
           context: .
           platforms: linux/arm64
           build-args: |
-            OPENCLAW_INSTALL_BROWSER=1
-            OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg
+            OPENCLAW_DOCKER_APT_PACKAGES=chromium xvfb ffmpeg jq sqlite3 openssh-client zip
           tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.labels.outputs.value }}
           provenance: false
