@@ -1,0 +1,244 @@
+name: Fork Main Browser Image
+run-name: Fork Main Browser Image ${{ github.sha }}
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "**/*.mdx"
+      - ".agents/**"
+      - "skills/**"
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full commit SHA to publish; defaults to the selected ref
+        required: false
+        type: string
+
+concurrency:
+  group: fork-main-browser-image
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  resolve_source:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      built_at: ${{ steps.source.outputs.built_at }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - name: Resolve source identity
+        id: source
+        shell: bash
+        env:
+          REQUESTED_SOURCE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${REQUESTED_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_sha must be a full lowercase 40-character commit SHA."
+            exit 1
+          fi
+          {
+            echo "source_sha=${REQUESTED_SOURCE_SHA}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+  build_amd64:
+    needs: resolve_source
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ needs.resolve_source.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Builder
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: tags
+        shell: bash
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          image="${IMAGE,,}"
+          {
+            echo "image=${image}"
+            echo "value<<EOF"
+            echo "${image}:main-amd64"
+            echo "${image}:main-slim-amd64"
+            echo "${image}:main-browser-amd64"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push amd64 browser image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          cache-from: type=gha,scope=fork-main-browser-amd64
+          cache-to: type=gha,mode=max,scope=fork-main-browser-amd64
+          build-args: |
+            GIT_COMMIT=${{ needs.resolve_source.outputs.source_sha }}
+            OPENCLAW_BUILD_TIMESTAMP=${{ needs.resolve_source.outputs.built_at }}
+            OPENCLAW_EXTENSIONS=diagnostics-otel,codex
+            OPENCLAW_INSTALL_BROWSER=1
+            OPENCLAW_DOCKER_APT_PACKAGES=chromium xvfb ffmpeg jq sqlite3 openssh-client zip fonts-noto-cjk
+          tags: ${{ steps.tags.outputs.value }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.resolve_source.outputs.source_sha }}
+            org.opencontainers.image.version=main
+            org.opencontainers.image.created=${{ needs.resolve_source.outputs.built_at }}
+          sbom: true
+          provenance: mode=max
+          push: true
+
+      - name: Smoke test amd64 browser image
+        shell: bash
+        env:
+          IMAGE_REF: ${{ steps.tags.outputs.image }}:main-amd64
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /bin/sh "${IMAGE_REF}" -lc '
+            set -eu
+            test -f /app/src/agents/templates/HEARTBEAT.md
+            browser="$(find /home/node/.cache/ms-playwright -maxdepth 5 -type f \( -name chrome -o -name chromium -o -name chrome-headless-shell \) -print | head -1)"
+            test -n "${browser}"
+            "${browser}" --version
+          '
+
+  build_arm64:
+    needs: resolve_source
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ needs.resolve_source.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Builder
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: tags
+        shell: bash
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          image="${IMAGE,,}"
+          {
+            echo "image=${image}"
+            echo "value<<EOF"
+            echo "${image}:main-arm64"
+            echo "${image}:main-slim-arm64"
+            echo "${image}:main-browser-arm64"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push arm64 browser image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/arm64
+          cache-from: type=gha,scope=fork-main-browser-arm64
+          cache-to: type=gha,mode=max,scope=fork-main-browser-arm64
+          build-args: |
+            GIT_COMMIT=${{ needs.resolve_source.outputs.source_sha }}
+            OPENCLAW_BUILD_TIMESTAMP=${{ needs.resolve_source.outputs.built_at }}
+            OPENCLAW_EXTENSIONS=diagnostics-otel,codex
+            OPENCLAW_INSTALL_BROWSER=1
+            OPENCLAW_DOCKER_APT_PACKAGES=chromium xvfb ffmpeg jq sqlite3 openssh-client zip fonts-noto-cjk
+          tags: ${{ steps.tags.outputs.value }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.resolve_source.outputs.source_sha }}
+            org.opencontainers.image.version=main
+            org.opencontainers.image.created=${{ needs.resolve_source.outputs.built_at }}
+          sbom: true
+          provenance: mode=max
+          push: true
+
+      - name: Smoke test arm64 browser image
+        shell: bash
+        env:
+          IMAGE_REF: ${{ steps.tags.outputs.image }}:main-arm64
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /bin/sh "${IMAGE_REF}" -lc '
+            set -eu
+            test -f /app/src/agents/templates/HEARTBEAT.md
+            browser="$(find /home/node/.cache/ms-playwright -maxdepth 5 -type f \( -name chrome -o -name chromium -o -name chrome-headless-shell \) -print | head -1)"
+            test -n "${browser}"
+            "${browser}" --version
+          '
+
+  create_manifests:
+    needs: [build_amd64, build_arm64]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Builder
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and verify multi-platform manifests
+        shell: bash
+        env:
+          AMD64_DIGEST: ${{ needs.build_amd64.outputs.digest }}
+          ARM64_DIGEST: ${{ needs.build_arm64.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          image="${IMAGE,,}"
+          for tag in main main-slim main-browser; do
+            docker buildx imagetools create \
+              --tag "${image}:${tag}" \
+              "${image}@${AMD64_DIGEST}" \
+              "${image}@${ARM64_DIGEST}"
+            docker buildx imagetools inspect "${image}:${tag}"
+          done

@@ -7,21 +7,24 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
-  workflows: write # 关键：允许修改工作流文件
+
 jobs:
   sync:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout fork
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add upstream remote and merge
+        id: merge
         run: |
           set -euo pipefail
+          before="$(git rev-parse HEAD)"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/openclaw/openclaw.git
@@ -31,6 +34,31 @@ jobs:
             git merge --abort
             exit 1
           }
+          after="$(git rev-parse HEAD)"
+          {
+            echo "changed=$([[ "${before}" != "${after}" ]] && echo true || echo false)"
+            echo "source_sha=${after}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Push changes
-        run: git push origin main
+        if: steps.merge.outputs.changed == 'true'
+        run: git push origin HEAD:main
+
+      # Pushes authenticated with GITHUB_TOKEN do not start another workflow.
+      # Dispatch explicitly so a successful scheduled sync still refreshes GHCR.
+      - name: Publish synchronized main image
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.merge.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          remote_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "${remote_sha}" != "${SOURCE_SHA}" ]]; then
+            echo "::error::Remote main is ${remote_sha}; expected synchronized commit ${SOURCE_SHA}."
+            exit 1
+          fi
+          gh workflow run docker-main-browser.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref main \
+            -f "source_sha=${SOURCE_SHA}"
