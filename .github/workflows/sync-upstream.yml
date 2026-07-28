@@ -20,37 +20,69 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Add upstream remote and merge
-        id: merge
+      - name: Synchronize upstream source
+        id: sync
         run: |
           set -euo pipefail
           before="$(git rev-parse HEAD)"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/openclaw/openclaw.git
-          git fetch upstream main
-          git merge upstream/main --no-edit || {
-            echo "::error::Merge conflict with upstream/main. Please pull upstream changes locally, resolve conflicts, and push to main."
-            git merge --abort
-            exit 1
-          }
+          git fetch --no-tags upstream main
+
+          # Record upstream ancestry without merging its repository-specific
+          # automation into this image-only fork. The following restore applies
+          # the upstream tree deterministically, so upstream changes cannot
+          # create modify/delete conflicts with workflows removed by this fork.
+          if ! git merge-base --is-ancestor upstream/main HEAD; then
+            git merge --strategy=ours upstream/main --no-edit
+          fi
+
+          git restore --source=upstream/main --staged --worktree -- .
+          git restore --source="${before}" --staged --worktree -- \
+            .github/workflows/docker-main-browser.yml \
+            .github/workflows/sync-upstream.yml
+
+          find .github/workflows -maxdepth 1 -type f \
+            ! -name docker-main-browser.yml \
+            ! -name sync-upstream.yml \
+            -delete
+          git add --all
+
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: synchronize upstream main"
+          fi
+
           after="$(git rev-parse HEAD)"
+          if git diff --quiet "${before}" "${after}" -- \
+            . \
+            ':(exclude).github/**' \
+            ':(exclude)docs/**' \
+            ':(exclude,glob)**/*.md' \
+            ':(exclude,glob)**/*.mdx' \
+            ':(exclude).agents/**' \
+            ':(exclude)skills/**'; then
+            publish_image=false
+          else
+            publish_image=true
+          fi
           {
             echo "changed=$([[ "${before}" != "${after}" ]] && echo true || echo false)"
             echo "source_sha=${after}"
+            echo "publish_image=${publish_image}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Push changes
-        if: steps.merge.outputs.changed == 'true'
+        if: steps.sync.outputs.changed == 'true'
         run: git push origin HEAD:main
 
       # Pushes authenticated with GITHUB_TOKEN do not start another workflow.
       # Dispatch explicitly so a successful scheduled sync still refreshes GHCR.
       - name: Publish synchronized main image
-        if: steps.merge.outputs.changed == 'true'
+        if: steps.sync.outputs.publish_image == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SOURCE_SHA: ${{ steps.merge.outputs.source_sha }}
+          SOURCE_SHA: ${{ steps.sync.outputs.source_sha }}
         run: |
           set -euo pipefail
           remote_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
