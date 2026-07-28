@@ -1,7 +1,9 @@
+// Whatsapp helper module supports normalize behavior.
 export {
-  isWhatsAppGroupJid,
   looksLikeWhatsAppTargetId,
-  normalizeWhatsAppAllowFromEntries,
+  normalizeWhatsAppAllowFromEntry,
   normalizeWhatsAppMessagingTarget,
+  isWhatsAppGroupJid,
+  isWhatsAppNewsletterJid,
   normalizeWhatsAppTarget,
-} from "openclaw/plugin-sdk/channel-runtime";
+} from "./normalize-target.js";
