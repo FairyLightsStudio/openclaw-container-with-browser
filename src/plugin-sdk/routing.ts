@@ -1,3 +1,6 @@
+/**
+ * Public SDK subpath for session keys, account bindings, and message-channel routing.
+ */
 export {
   buildAgentSessionKey,
   deriveLastRoutePolicy,
@@ -13,12 +16,15 @@ export {
   DEFAULT_MAIN_KEY,
   buildGroupHistoryKey,
   isCronSessionKey,
+  isAcpSessionKey,
+  isIncognitoSessionKey,
   isSubagentSessionKey,
   normalizeAccountId,
   normalizeAgentId,
   normalizeMainKey,
   normalizeOptionalAccountId,
   parseAgentSessionKey,
+  parseThreadSessionSuffix,
   resolveAgentIdFromSessionKey,
   resolveThreadSessionKeys,
   sanitizeAgentId,
@@ -29,3 +35,6 @@ export {
   formatSetExplicitDefaultInstruction,
   formatSetExplicitDefaultToConfiguredInstruction,
 } from "../routing/default-account-warnings.js";
+export { buildOutboundBaseSessionKey } from "../infra/outbound/base-session-key.js";
+export { normalizeOutboundThreadId } from "../infra/outbound/thread-id.js";
+export { normalizeMessageChannel, resolveGatewayMessageChannel } from "../utils/message-channel.js";

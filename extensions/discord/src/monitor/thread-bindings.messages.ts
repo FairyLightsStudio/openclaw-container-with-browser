@@ -1,6 +1,7 @@
+// Discord plugin module implements thread bindings.messages behavior.
 export {
-  formatThreadBindingDurationLabel,
   resolveThreadBindingFarewellText,
   resolveThreadBindingIntroText,
   resolveThreadBindingThreadName,
-} from "openclaw/plugin-sdk/channel-runtime";
+  formatThreadBindingDurationLabel,
+} from "openclaw/plugin-sdk/conversation-runtime";

@@ -1,5 +1,17 @@
 {
   "id": "perplexity",
+  "icon": "https://cdn.simpleicons.org/perplexity",
+  "activation": {
+    "onStartup": false
+  },
+  "setup": {
+    "providers": [
+      {
+        "id": "perplexity",
+        "envVars": ["PERPLEXITY_API_KEY", "OPENROUTER_API_KEY"]
+      }
+    ]
+  },
   "uiHints": {
     "webSearch.apiKey": {
       "label": "Perplexity API Key",
@@ -15,6 +27,9 @@
       "label": "Perplexity Model",
       "help": "Optional Sonar/OpenRouter model override."
     }
+  },
+  "contracts": {
+    "webSearchProviders": ["perplexity"]
   },
   "configSchema": {
     "type": "object",

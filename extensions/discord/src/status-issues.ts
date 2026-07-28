@@ -1,13 +1,15 @@
+// Discord plugin module implements status issues behavior.
+import type {
+  ChannelAccountSnapshot,
+  ChannelStatusIssue,
+} from "openclaw/plugin-sdk/channel-contract";
 import {
   appendMatchMetadata,
   asString,
   isRecord,
+  readAccountStatusSnapshot,
   resolveEnabledConfiguredAccountId,
-} from "openclaw/plugin-sdk/channel-runtime";
-import type {
-  ChannelAccountSnapshot,
-  ChannelStatusIssue,
-} from "openclaw/plugin-sdk/channel-runtime";
+} from "openclaw/plugin-sdk/status-helpers";
 
 type DiscordIntentSummary = {
   messageContent?: "enabled" | "limited" | "disabled";
@@ -15,14 +17,6 @@ type DiscordIntentSummary = {
 
 type DiscordApplicationSummary = {
   intents?: DiscordIntentSummary;
-};
-
-type DiscordAccountStatus = {
-  accountId?: unknown;
-  enabled?: unknown;
-  configured?: unknown;
-  application?: unknown;
-  audit?: unknown;
 };
 
 type DiscordPermissionsAuditSummary = {
@@ -36,19 +30,6 @@ type DiscordPermissionsAuditSummary = {
     matchSource?: string;
   }>;
 };
-
-function readDiscordAccountStatus(value: ChannelAccountSnapshot): DiscordAccountStatus | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  return {
-    accountId: value.accountId,
-    enabled: value.enabled,
-    configured: value.configured,
-    application: value.application,
-    audit: value.audit,
-  };
-}
 
 function readDiscordApplicationSummary(value: unknown): DiscordApplicationSummary {
   if (!isRecord(value)) {
@@ -115,13 +96,39 @@ export function collectDiscordStatusIssues(
 ): ChannelStatusIssue[] {
   const issues: ChannelStatusIssue[] = [];
   for (const entry of accounts) {
-    const account = readDiscordAccountStatus(entry);
+    const account = readAccountStatusSnapshot(entry, ["healthState", "application", "audit"]);
     if (!account) {
       continue;
     }
     const accountId = resolveEnabledConfiguredAccountId(account);
     if (!accountId) {
       continue;
+    }
+
+    const running = account.running === true;
+    const healthState = asString(account.healthState);
+    if (
+      healthState === "stale-socket" ||
+      healthState === "stuck" ||
+      healthState === "disconnected" ||
+      healthState === "not-running"
+    ) {
+      const runningLabel = running ? "running" : "not running";
+      issues.push({
+        channel: "discord",
+        accountId,
+        kind: "runtime",
+        message: `Discord gateway transport is degraded (${healthState}; account is ${runningLabel}).`,
+        fix: "Check gateway event-loop health and Discord connectivity, then restart the Discord channel or gateway if the transport does not recover.",
+      });
+    } else if (running && account.connected === false) {
+      issues.push({
+        channel: "discord",
+        accountId,
+        kind: "runtime",
+        message: "Discord gateway transport is running but disconnected.",
+        fix: "Check gateway logs for Discord websocket errors and wait for reconnect; restart the Discord channel or gateway if it does not recover.",
+      });
     }
 
     const app = readDiscordApplicationSummary(account.application);
