@@ -307,8 +307,8 @@ describe("findSettingsSearchBlocks", () => {
 
     expect(matches).toEqual([
       expect.objectContaining({
-        routeId: "config",
-        hash: "#settings-general-model",
+        routeId: "model-providers",
+        hash: "#settings-model-behavior",
       }),
       expect.objectContaining({
         routeId: "appearance",
@@ -375,6 +375,23 @@ describe("findSettingsSearchBlocks", () => {
       expect.objectContaining({
         routeId: "worktrees",
         label: "Managed Worktrees",
+        hash: "",
+      }),
+    ]);
+  });
+
+  it("routes profile statistics searches to Usage", () => {
+    const matches = findSettingsSearchBlocks({
+      query: "usage statistics",
+      schema: null,
+      value: null,
+      uiHints: {},
+    });
+
+    expect(matches).toEqual([
+      expect.objectContaining({
+        routeId: "usage",
+        label: "Usage statistics",
         hash: "",
       }),
     ]);

@@ -30,7 +30,7 @@ import {
   APPEARANCE_SETTINGS_TARGET_IDS,
   COMMUNICATION_SETTINGS_TARGET_IDS,
   CONNECTION_SETTINGS_TARGET_IDS,
-  GENERAL_SETTINGS_TARGET_IDS,
+  MODEL_SETTINGS_TARGET_IDS,
   PROFILE_SETTINGS_TARGET_IDS,
 } from "./settings-targets.ts";
 
@@ -45,23 +45,6 @@ type StaticSettingsBlock = SettingsSearchBlock & {
 };
 
 const GENERAL_SETTINGS_BLOCKS = {
-  model: {
-    routeId: "config",
-    labelKey: "quickSettings.model.title",
-    hash: `#${GENERAL_SETTINGS_TARGET_IDS.model}`,
-    searchKeys: [
-      "quickSettings.model.model",
-      "quickSettings.model.thinking",
-      "quickSettings.model.fastMode",
-      "quickSettings.model.thinkingLevels.off",
-      "quickSettings.model.thinkingLevels.low",
-      "quickSettings.model.thinkingLevels.medium",
-      "quickSettings.model.thinkingLevels.high",
-      "quickSettings.model.fastModes.auto",
-      "quickSettings.model.fastModes.fast",
-      "quickSettings.model.fastModes.standard",
-    ],
-  },
   channels: {
     routeId: "channels",
     labelKey: "quickSettings.channels.title",
@@ -106,6 +89,26 @@ const GENERAL_SETTINGS_BLOCKS = {
       "profilePage.identity.linkedEmails",
     ],
     aliases: "profile avatar image email",
+  },
+} as const satisfies Record<string, StaticSettingsBlockDescriptor>;
+
+const MODEL_SETTINGS_BLOCKS = {
+  behavior: {
+    routeId: "model-providers",
+    labelKey: "quickSettings.model.title",
+    hash: `#${MODEL_SETTINGS_TARGET_IDS.behavior}`,
+    searchKeys: [
+      "quickSettings.model.model",
+      "quickSettings.model.thinking",
+      "quickSettings.model.fastMode",
+      "quickSettings.model.thinkingLevels.off",
+      "quickSettings.model.thinkingLevels.low",
+      "quickSettings.model.thinkingLevels.medium",
+      "quickSettings.model.thinkingLevels.high",
+      "quickSettings.model.fastModes.auto",
+      "quickSettings.model.fastModes.fast",
+      "quickSettings.model.fastModes.standard",
+    ],
   },
 } as const satisfies Record<string, StaticSettingsBlockDescriptor>;
 
@@ -223,9 +226,21 @@ const COMMUNICATION_SETTINGS_BLOCKS = {
   },
 } as const satisfies Record<string, StaticSettingsBlockDescriptor>;
 
-// Sessions-hub workspace pages have no schema-backed config section, so they
-// only surface in search through these static entries.
+// Workspace pages without a schema-backed config section only surface in
+// search through these static entries.
 const WORKSPACE_SETTINGS_BLOCKS = {
+  usage: {
+    routeId: "usage",
+    labelKey: "profilePage.usageStatistics",
+    hash: "",
+    searchKeys: [
+      "profilePage.usageStatisticsDescription",
+      "usage.heatmap.title",
+      "usage.heatmap.subtitle",
+      "usage.overview.title",
+    ],
+    aliases: "stats statistics analytics tokens costs activity streaks",
+  },
   sessions: {
     routeId: "sessions",
     labelKey: "sessionsView.title",
@@ -244,6 +259,7 @@ const WORKSPACE_SETTINGS_BLOCKS = {
 
 const STATIC_SETTINGS_BLOCKS: readonly StaticSettingsBlockDescriptor[] = [
   ...Object.values(GENERAL_SETTINGS_BLOCKS),
+  ...Object.values(MODEL_SETTINGS_BLOCKS),
   ...Object.values(APPEARANCE_SETTINGS_BLOCKS),
   ...Object.values(COMMUNICATION_SETTINGS_BLOCKS),
   ...Object.values(WORKSPACE_SETTINGS_BLOCKS),
