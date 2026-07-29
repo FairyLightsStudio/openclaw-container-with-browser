@@ -50,7 +50,7 @@ import {
 } from "./config-sections.ts";
 import { renderMcp } from "./mcp.ts";
 import { renderMemoryPage } from "./memory-page.ts";
-import { narrowMemorySchema, normalizeMemoryTab } from "./memory-schema.ts";
+import { narrowMemorySchema } from "./memory-schema.ts";
 import { renderQuickSettings } from "./quick.ts";
 import { configTargetIdFromHash, type ConfigRouteData } from "./route-data.ts";
 import { renderSecurity, type SecurityOverview } from "./security.ts";
@@ -58,6 +58,8 @@ import {
   buildSessionObserverTogglePatch,
   buildSessionObserverUtilityModelPatch,
 } from "./session-observer-settings.ts";
+import { SETTINGS_SEARCH_TARGETS } from "./settings-targets.ts";
+import { renderTalkPage } from "./talk-page.ts";
 import {
   createConfigViewState,
   renderConfig,
@@ -89,8 +91,8 @@ type ConfigPageSetting =
 // settings-search links predating the move must land on the new home.
 const MOVED_TARGET_ROUTES: Record<string, { routeId: RouteId; hash: string }> = {
   "config:settings-general-model": {
-    routeId: "model-providers",
-    hash: "#settings-model-behavior",
+    routeId: SETTINGS_SEARCH_TARGETS.modelBehavior.routeId,
+    hash: SETTINGS_SEARCH_TARGETS.modelBehavior.hash,
   },
 };
 
@@ -98,6 +100,7 @@ const MOVED_SECTION_ROUTES: Record<string, { routeId: RouteId; keepSection: bool
   "communications:__notifications__": { routeId: "notifications", keepSection: false },
   "communications:channels": { routeId: "channels", keepSection: false },
   "communications:broadcast": { routeId: "advanced", keepSection: true },
+  "communications:talk": { routeId: "talk", keepSection: true },
   "automation:approvals": { routeId: "security", keepSection: true },
   "ai-agents:memory": { routeId: "memory", keepSection: true },
   "ai-agents:models": { routeId: "model-providers", keepSection: false },
@@ -121,6 +124,8 @@ function defaultConfigSelection(pageId: ConfigPageId): ConfigSelection {
       return { activeSection: "mcp", activeSubsection: null };
     case "memory":
       return { activeSection: "memory", activeSubsection: null };
+    case "talk":
+      return { activeSection: "talk", activeSubsection: null };
     case "infrastructure":
       return { activeSection: "gateway", activeSubsection: null };
     case "ai-agents":
@@ -256,6 +261,7 @@ export class ConfigPage extends OpenClawLightDomElement {
     automation: "form",
     mcp: "form",
     memory: "form",
+    talk: "form",
     infrastructure: "form",
     "ai-agents": "form",
     advanced: "form",
@@ -269,6 +275,7 @@ export class ConfigPage extends OpenClawLightDomElement {
     automation: defaultConfigSelection("automation"),
     mcp: defaultConfigSelection("mcp"),
     memory: defaultConfigSelection("memory"),
+    talk: defaultConfigSelection("talk"),
     infrastructure: defaultConfigSelection("infrastructure"),
     "ai-agents": defaultConfigSelection("ai-agents"),
     advanced: defaultConfigSelection("advanced"),
@@ -872,8 +879,6 @@ export class ConfigPage extends OpenClawLightDomElement {
       saving: configState.configSaving,
       applying: configState.configApplying,
       updating: this.isUpdateBusy(),
-      autoSaveStatus: configState.configAutoSaveStatus,
-      needsApply: configState.configNeedsApply,
       connected: configState.connected,
       schema: configState.configSchema,
       schemaLoading: configState.configSchemaLoading,
@@ -896,7 +901,6 @@ export class ConfigPage extends OpenClawLightDomElement {
       onSectionChange: (section) => this.setActiveSection(section),
       onSubsectionChange: (section) => this.setActiveSubsection(section),
       onSave: () => void runtimeConfig.save(),
-      onApply: () => void runtimeConfig.apply(),
       onRawDiscard: () => void runtimeConfig.discardDraft(),
       onOpenFile: () => void runtimeConfig.openFile(),
       version:
@@ -1035,10 +1039,7 @@ export class ConfigPage extends OpenClawLightDomElement {
         configObject,
         pluginsHref: pathForRoute("plugins", this.context.basePath),
         memoryImportHref: pathForRoute("memory-import", this.context.basePath),
-        tab: normalizeMemoryTab(this.routeData?.tab),
-        // Memory's engine and backend are product decisions, not power-user
-        // knobs: this page forces the advanced tier open so they never hide
-        // behind the global Advanced toggle.
+        routeData: this.routeData,
         buildEditor: (keys) =>
           renderConfig({
             ...props,
@@ -1047,8 +1048,21 @@ export class ConfigPage extends OpenClawLightDomElement {
             activeSubsection: null,
             showModeToggle: false,
             embeddedEditor: true,
-            forceShowAdvanced: true,
             navRootLabel: t("tabs.memory"),
+          }),
+      });
+    }
+    if (this.pageId === "talk") {
+      return renderTalkPage({
+        configObject,
+        buildEditor: () =>
+          renderConfig({
+            ...props,
+            activeSection: "talk",
+            activeSubsection: null,
+            showModeToggle: false,
+            embeddedEditor: true,
+            navRootLabel: t("tabs.talk"),
           }),
       });
     }
@@ -1076,23 +1090,10 @@ export class ConfigPage extends OpenClawLightDomElement {
   }
 
   private renderQuickConfig() {
-    const runtimeConfig = this.context.runtimeConfig;
     return renderQuickSettings({
       locale: isSupportedLocale(this.settings.locale) ? this.settings.locale : i18n.getLocale(),
       onLocaleChange: (locale) => this.setLocale(locale),
       onModelsClick: () => this.navigate("model-providers"),
-      connected: runtimeConfig.state.connected,
-      configLoading: runtimeConfig.state.configLoading,
-      configSaving: runtimeConfig.state.configSaving,
-      configApplying: runtimeConfig.state.configApplying,
-      configUpdating: this.isUpdateBusy(),
-      configNeedsApply: runtimeConfig.state.configNeedsApply,
-      configRawDraftPending:
-        runtimeConfig.state.configFormMode === "raw" && runtimeConfig.state.configFormDirty,
-      configAutoSaveStatus: runtimeConfig.state.configAutoSaveStatus,
-      onApplyConfig: () => void runtimeConfig.apply(),
-      onRetrySaveConfig: () => void runtimeConfig.save(),
-      onDiscardConfig: () => void runtimeConfig.discardDraft(),
     });
   }
 
