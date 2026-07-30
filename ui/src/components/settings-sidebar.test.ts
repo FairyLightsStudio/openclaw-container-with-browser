@@ -40,7 +40,7 @@ describe("settings sidebar search", () => {
         activeRouteId: "model-setup",
         offline: false,
         lastError: null,
-        version: "",
+        gatewayVersion: "",
         updateAvailable: null,
         updateRunning: false,
         onUpdate: vi.fn(),
@@ -68,10 +68,10 @@ describe("settings sidebar search", () => {
     render(
       renderSettingsSidebar({
         basePath: "",
-        activeRouteId: "config",
+        activeRouteId: "appearance",
         offline: false,
         lastError: null,
-        version: "",
+        gatewayVersion: "",
         updateAvailable: null,
         updateRunning: false,
         onUpdate: vi.fn(),
@@ -98,10 +98,10 @@ describe("settings sidebar search", () => {
     render(
       renderSettingsSidebar({
         basePath: "",
-        activeRouteId: "config",
+        activeRouteId: "appearance",
         offline: false,
         lastError: null,
-        version: "",
+        gatewayVersion: "",
         updateAvailable: null,
         updateRunning: false,
         onUpdate: vi.fn(),
@@ -136,19 +136,20 @@ describe("settings sidebar search", () => {
     render(
       renderSettingsSidebar({
         basePath: "",
-        activeRouteId: "config",
+        activeRouteId: "appearance",
         offline: false,
         lastError: null,
-        version: "",
+        gatewayVersion: "",
         updateAvailable: null,
         updateRunning: false,
         onUpdate: vi.fn(),
         searchQuery: "mcp",
         searchBlockMatches: [
           {
-            routeId: "config",
-            label: "Automations",
-            hash: "#settings-general-automations",
+            routeId: "appearance",
+            label: "Language",
+            search: "?section=__appearance__",
+            hash: "#settings-language",
           },
           {
             routeId: "mcp",
@@ -172,15 +173,16 @@ describe("settings sidebar search", () => {
         ".settings-sidebar__item-label, .settings-sidebar__subitem-label",
       ),
     ].map((item) => item.textContent?.trim());
-    expect(resultLabels).toEqual(["MCP", "General", "Automations"]);
+    expect(resultLabels).toEqual(["MCP", "Appearance", "Language"]);
     expect(container.querySelector(".settings-sidebar__item--active")).toBeNull();
 
-    const automations = container.querySelector<HTMLAnchorElement>(
-      '.settings-sidebar__subitem[href="/settings/general#settings-general-automations"]',
+    const language = container.querySelector<HTMLAnchorElement>(
+      '.settings-sidebar__subitem[href="/settings/appearance?section=__appearance__#settings-language"]',
     );
-    automations?.click();
-    expect(onNavigate).toHaveBeenCalledWith("config", {
-      hash: "#settings-general-automations",
+    language?.click();
+    expect(onNavigate).toHaveBeenCalledWith("appearance", {
+      search: "?section=__appearance__",
+      hash: "#settings-language",
     });
   });
 
@@ -189,10 +191,10 @@ describe("settings sidebar search", () => {
     render(
       renderSettingsSidebar({
         basePath: "",
-        activeRouteId: "config",
+        activeRouteId: "appearance",
         offline: false,
         lastError: null,
-        version: "",
+        gatewayVersion: "",
         updateAvailable: null,
         updateRunning: false,
         onUpdate: vi.fn(),
@@ -233,6 +235,34 @@ describe("settings sidebar search", () => {
     });
   });
 
+  it("finds Agent Defaults by page name after its sidebar demotion", () => {
+    render(
+      renderSettingsSidebar({
+        basePath: "",
+        activeRouteId: "agents",
+        offline: false,
+        lastError: null,
+        gatewayVersion: "",
+        updateAvailable: null,
+        updateRunning: false,
+        onUpdate: vi.fn(),
+        searchQuery: "agent defaults",
+        onExit: vi.fn(),
+        onRetryConnect: vi.fn(),
+        onNavigate: vi.fn(),
+        onSearchQueryChange: vi.fn(),
+        preloadTimers: new Map(),
+        saveIndicator: saveIndicator(),
+      }),
+      container,
+    );
+
+    const result = container.querySelector<HTMLAnchorElement>(
+      '.settings-sidebar__item[href="/settings/ai-agents"]',
+    );
+    expect(result?.textContent?.trim()).toBe("Agent Defaults");
+  });
+
   it("keeps Memory search results on the canonical Settings tab path", () => {
     const onNavigate = vi.fn();
     render(
@@ -243,7 +273,7 @@ describe("settings sidebar search", () => {
         activeHash: "#memory-backend",
         offline: false,
         lastError: null,
-        version: "",
+        gatewayVersion: "",
         updateAvailable: null,
         updateRunning: false,
         onUpdate: vi.fn(),
@@ -285,10 +315,10 @@ describe("settings sidebar search", () => {
       render(
         renderSettingsSidebar({
           basePath: "",
-          activeRouteId: "config",
+          activeRouteId: "appearance",
           offline: false,
           lastError: null,
-          version: "",
+          gatewayVersion: "",
           updateAvailable: null,
           updateRunning: false,
           onUpdate: vi.fn(),
@@ -366,10 +396,10 @@ describe("settings sidebar search", () => {
     render(
       renderSettingsSidebar({
         basePath: "",
-        activeRouteId: "config",
+        activeRouteId: "appearance",
         offline: false,
         lastError: null,
-        version: "",
+        gatewayVersion: "",
         updateAvailable: null,
         updateRunning: false,
         onUpdate: vi.fn(),
@@ -394,13 +424,14 @@ describe("settings sidebar search", () => {
 
   it("keeps the update card above the settings footer", async () => {
     const onUpdate = vi.fn();
+    const onNavigate = vi.fn();
     render(
       renderSettingsSidebar({
         basePath: "",
-        activeRouteId: "config",
+        activeRouteId: "appearance",
         offline: false,
         lastError: null,
-        version: "1.0.0",
+        gatewayVersion: "1.0.0",
         updateAvailable: {
           currentVersion: "1.0.0",
           latestVersion: "2.0.0",
@@ -411,7 +442,7 @@ describe("settings sidebar search", () => {
         searchQuery: "",
         onExit: vi.fn(),
         onRetryConnect: vi.fn(),
-        onNavigate: vi.fn(),
+        onNavigate,
         onSearchQueryChange: vi.fn(),
         preloadTimers: new Map(),
         saveIndicator: saveIndicator(),
@@ -426,6 +457,19 @@ describe("settings sidebar search", () => {
     expect(card?.nextElementSibling?.classList.contains("settings-sidebar__footer")).toBe(true);
     card?.querySelector<HTMLButtonElement>(".sidebar-update-card__action")?.click();
     expect(onUpdate).toHaveBeenCalledOnce();
+
+    const buildChip = container.querySelector<
+      HTMLElement & {
+        gatewayVersion: string | null;
+        variant: string;
+        updateComplete: Promise<boolean>;
+      }
+    >("openclaw-sidebar-build-chip");
+    await buildChip?.updateComplete;
+    expect(buildChip?.gatewayVersion).toBe("1.0.0");
+    expect(buildChip?.variant).toBe("settings");
+    buildChip?.querySelector<HTMLAnchorElement>(".sidebar-footer-build")?.click();
+    expect(onNavigate).toHaveBeenCalledWith("about");
   });
 
   it("shows the offline retry action without an online status", () => {
@@ -434,11 +478,11 @@ describe("settings sidebar search", () => {
       render(
         renderSettingsSidebar({
           basePath: "",
-          activeRouteId: "config",
+          activeRouteId: "appearance",
           offline,
           queuedOutboxCount,
           lastError,
-          version: "1.0.0",
+          gatewayVersion: "1.0.0",
           updateAvailable: null,
           updateRunning: false,
           onUpdate: vi.fn(),

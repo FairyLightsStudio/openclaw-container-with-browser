@@ -115,7 +115,12 @@ describe("listGatewayMethods", () => {
   });
 
   it("advertises Control UI session pull request detection", () => {
-    expect(listGatewayMethods()).toContain("controlUi.sessionPullRequests");
+    expect(listGatewayMethods()).toContain("controlUi.sessionPullRequests.subscribe");
+    expect(GATEWAY_EVENTS).toContain("controlUi.sessionPullRequests.changed");
+  });
+
+  it("advertises explicit session viewer presence", () => {
+    expect(listGatewayMethods()).toContain("sessions.viewers.set");
   });
 
   it("advertises session workspace reveal", () => {

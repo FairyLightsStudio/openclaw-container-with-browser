@@ -34,6 +34,7 @@ import { renderDreamingSettings, renderDreamingUnsupported } from "./memory-drea
 import { renderMemoryOverview, type MemoryOverviewStatus } from "./memory-overview.ts";
 import {
   canonicalMemoryRouteLocation,
+  DEFAULT_MEMORY_ENGINE_ID,
   memoryTabForRoute,
   memorySchemaKeysForTab,
   resolveMemoryBackend,
@@ -80,6 +81,7 @@ type MemoryAddonNotice = {
 
 type MemoryPageProps = {
   configObject: Record<string, unknown>;
+  mutationDisabled: boolean;
   pluginsHref: string;
   memoryImportHref: string;
   routeData: ConfigRouteData | null;
@@ -116,6 +118,7 @@ class MemorySettingsPage extends OpenClawLightDomElement {
   private context!: ApplicationContext;
 
   @property({ attribute: false }) configObject: Record<string, unknown> = {};
+  @property({ type: Boolean }) mutationDisabled = false;
   @property() pluginsHref = "";
   @property() memoryImportHref = "";
   @property({ attribute: false }) routeData: ConfigRouteData | null = null;
@@ -407,10 +410,39 @@ class MemorySettingsPage extends OpenClawLightDomElement {
     if (this.catalog.kind !== "ready") {
       return [];
     }
-    return this.catalog.plugins
+    const options = this.catalog.plugins
       .filter(isMemoryEngine)
-      .map((plugin) => ({ id: plugin.id, label: plugin.name }))
-      .toSorted((left, right) => left.label.localeCompare(right.label));
+      .map((plugin) => ({
+        id: plugin.id,
+        label:
+          plugin.id === DEFAULT_MEMORY_ENGINE_ID
+            ? t("memoryPage.engine.openClawMemory")
+            : plugin.name,
+        available: true,
+      }))
+      .toSorted((left, right) => {
+        const leftIsDefault = left.id === DEFAULT_MEMORY_ENGINE_ID;
+        const rightIsDefault = right.id === DEFAULT_MEMORY_ENGINE_ID;
+        if (leftIsDefault !== rightIsDefault) {
+          return leftIsDefault ? -1 : 1;
+        }
+        return left.label.localeCompare(right.label);
+      });
+    const selected = selectedEngineId(resolveMemoryEngineSelection(this.configObject));
+    if (selected && !options.some((option) => option.id === selected)) {
+      const unavailable = {
+        id: selected,
+        label:
+          selected === DEFAULT_MEMORY_ENGINE_ID ? t("memoryPage.engine.openClawMemory") : selected,
+        available: false,
+      };
+      if (selected === DEFAULT_MEMORY_ENGINE_ID) {
+        options.unshift(unavailable);
+      } else {
+        options.push(unavailable);
+      }
+    }
+    return options;
   }
 
   private engineState(selection: MemoryEngineSelection): MemoryPluginState {
@@ -448,6 +480,7 @@ class MemorySettingsPage extends OpenClawLightDomElement {
   private async changeAddon(pluginId: string, enabled: boolean) {
     if (
       this.addonBusy.has(pluginId) ||
+      this.mutationDisabled ||
       this.catalog.kind !== "ready" ||
       !this.catalog.mutationAllowed ||
       !readGatewayOperatorAccess(this.context.gateway.snapshot).canAdmin
@@ -508,7 +541,11 @@ class MemorySettingsPage extends OpenClawLightDomElement {
   }
 
   private async changeEngine(engineId: string | null, currentSelection: MemoryEngineSelection) {
-    if (this.engineBusy) {
+    if (
+      this.engineBusy ||
+      this.mutationDisabled ||
+      (this.catalog.kind === "ready" && !this.catalog.mutationAllowed)
+    ) {
       return;
     }
     if (engineId === selectedEngineId(currentSelection)) {
@@ -529,6 +566,10 @@ class MemorySettingsPage extends OpenClawLightDomElement {
     this.engineBusy = true;
     this.engineError = null;
     try {
+      // `Off` is an autosaved form edit. Let it adopt its ack hash before the
+      // plugin RPC performs its own CAS write, or rapid Off -> engine changes
+      // can race each other and reject the second write as stale.
+      await this.context.runtimeConfig.waitForPendingWrites();
       await setPluginEnabled(client, engineId, true);
       await this.context.runtimeConfig.refresh();
       await this.loadCatalog(client, connection);
@@ -580,6 +621,9 @@ class MemorySettingsPage extends OpenClawLightDomElement {
   }
 
   private patchDreaming(path: readonly string[], value: unknown) {
+    if (this.mutationDisabled) {
+      return;
+    }
     const runtimeConfig = this.context.runtimeConfig;
     const writePath = [
       "plugins",
@@ -607,6 +651,7 @@ class MemorySettingsPage extends OpenClawLightDomElement {
         ? renderDreamingUnsupported(pluginId)
         : renderDreamingSettings({
             dreaming: this.dreamingConfig(),
+            disabled: this.mutationDisabled,
             onPatch: (path, value) => this.patchDreaming(path, value),
           })}
     `;
@@ -621,6 +666,8 @@ class MemorySettingsPage extends OpenClawLightDomElement {
   override render() {
     const runtimeConfig = this.context.runtimeConfig;
     const engineSelection = resolveMemoryEngineSelection(this.configObject);
+    const engineMutationDisabled =
+      this.mutationDisabled || (this.catalog.kind === "ready" && !this.catalog.mutationAllowed);
     const backend = resolveMemoryBackend(this.configObject);
     const activeTab = this.activeTab();
     const agentId = this.resolveAgentId();
@@ -631,28 +678,34 @@ class MemorySettingsPage extends OpenClawLightDomElement {
       engineOptions: this.engineOptions(),
       engineSelection,
       engineState: this.engineState(engineSelection),
-      engineBusy: this.engineBusy,
+      engineBusy: this.engineBusy || engineMutationDisabled,
       engineError: this.engineError,
       onEngineChange: (nextEngineId) => void this.changeEngine(nextEngineId, engineSelection),
       backend,
-      backendBusy: runtimeConfig.state.configSaving || runtimeConfig.state.configApplying,
-      onBackendChange: (next) => runtimeConfig.patchForm(["memory", "backend"], next),
+      backendBusy: this.mutationDisabled,
+      onBackendChange: (next) => {
+        if (!this.mutationDisabled) {
+          runtimeConfig.patchForm(["memory", "backend"], next);
+        }
+      },
       addons: this.addonRows(),
       canToggleAddons:
         this.catalog.kind === "ready" &&
         this.catalog.mutationAllowed &&
+        !this.mutationDisabled &&
         readGatewayOperatorAccess(this.context.gateway.snapshot).canAdmin,
       onAddonChange: (pluginId, enabled) => void this.changeAddon(pluginId, enabled),
       pluginsHref: this.pluginsHref,
       memoryImportHref: this.memoryImportHref,
+      agentId,
+      agents,
+      onAgentChange: (next) => this.selectAgent(next),
       overview: renderMemoryOverview({
         agentId,
-        agents,
         engineSelection,
         engineDisabled: this.engineState(engineSelection) === "disabled",
         status: this.overviewStatus,
         probingEmbeddings: this.probingEmbeddings,
-        onAgentChange: (next) => this.selectAgent(next),
         onRefresh: () => void this.loadOverviewStatus({ force: true }),
         onProbeEmbeddings: () =>
           void this.loadOverviewStatus({ force: true, probeEmbeddings: true }),
@@ -667,17 +720,9 @@ class MemorySettingsPage extends OpenClawLightDomElement {
             "memory.search",
           ) === true}
           .agentId=${agentId}
-          .agents=${agents}
-          .onAgentChange=${(next: string | null) => this.selectAgent(next)}
         ></openclaw-memory-memories>
       `,
-      dreams: html`
-        <openclaw-memory-dreaming
-          .agentId=${agentId}
-          .agents=${agents}
-          .onAgentChange=${(next: string | null) => this.selectAgent(next)}
-        ></openclaw-memory-dreaming>
-      `,
+      dreams: html` <openclaw-memory-dreaming .agentId=${agentId}></openclaw-memory-dreaming> `,
       editor:
         activeTab === "settings"
           ? this.buildEditor(memorySchemaKeysForTab("settings", backend))
@@ -695,6 +740,7 @@ export function renderMemoryPage(props: MemoryPageProps) {
   return html`
     <openclaw-memory-settings
       .configObject=${props.configObject}
+      .mutationDisabled=${props.mutationDisabled}
       .pluginsHref=${props.pluginsHref}
       .memoryImportHref=${props.memoryImportHref}
       .routeData=${props.routeData}

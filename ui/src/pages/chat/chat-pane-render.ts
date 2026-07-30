@@ -108,18 +108,18 @@ export class ChatPane extends ChatPaneHeader {
       layout: state.sidebarLayout,
       paneWidth: this.paneWidth,
     });
-    const runtimeConfigState = this.context.runtimeConfig.state;
-    const configSnapshot = runtimeConfigState.configSnapshot;
-    const serverQueueMode = resolveControlUiServerQueueMode(configSnapshot?.runtimeConfig, {
-      configNeedsApply: runtimeConfigState.configNeedsApply,
-      effectiveMode: state.chatEffectiveQueueMode,
-      sessionMetadataLoaded:
-        selectedSession !== undefined || state.chatEffectiveQueueMode !== undefined,
-      sessionMode: state.chatQueueModeOverride,
-    });
     state.chatFollowUpMode = resolveControlUiFollowUpMode(
       state.settings.chatFollowUpMode,
-      serverQueueMode,
+      resolveControlUiServerQueueMode(
+        this.context.runtimeConfig.state.configSnapshot?.runtimeConfig,
+        {
+          configNeedsApply: this.context.runtimeConfig.state.configNeedsApply,
+          effectiveMode: state.chatEffectiveQueueMode,
+          sessionMetadataLoaded:
+            selectedSession !== undefined || state.chatEffectiveQueueMode !== undefined,
+          sessionMode: state.chatQueueModeOverride,
+        },
+      ),
     );
     const currentAgentId = resolveChatAgentId(state);
     const catalogKey = parseCatalogSessionKey(state.sessionKey);
@@ -155,28 +155,29 @@ export class ChatPane extends ChatPaneHeader {
       sessionKey: `${currentAgentId ?? ""}\0${state.sessionKey}`,
       session: selectedSession,
     });
+    const gatewaySnapshot = this.context.gateway.snapshot;
     const multiIdentity = this.hasMultipleIdentities();
     const suggestionViewer =
       multiIdentity &&
       !selectedSessionArchived &&
-      hasOperatorWriteAccess(this.context.gateway.snapshot.hello?.auth ?? null) &&
+      hasOperatorWriteAccess(gatewaySnapshot.hello?.auth ?? null) &&
       selectedSession?.visibility === "suggest" &&
       selectedSession.sharingRole === "viewer" &&
-      isGatewayMethodAdvertised(this.context.gateway.snapshot, "session.suggestions.add") ===
-        true &&
-      isGatewayMethodAdvertised(this.context.gateway.snapshot, "session.suggestions.list") === true;
+      isGatewayMethodAdvertised(gatewaySnapshot, "session.suggestions.add") === true &&
+      isGatewayMethodAdvertised(gatewaySnapshot, "session.suggestions.list") === true;
     const disabledReason =
       sessionParticipationBlocked && !suggestionViewer
         ? t("chat.sessionSharing.readOnlyNotice")
         : null;
     const typingEnabled =
       multiIdentity &&
-      hasOperatorWriteAccess(this.context.gateway.snapshot.hello?.auth ?? null) &&
+      hasOperatorWriteAccess(gatewaySnapshot.hello?.auth ?? null) &&
       !catalogKey &&
-      isGatewayMethodAdvertised(this.context.gateway.snapshot, "session.typing") === true &&
+      isGatewayMethodAdvertised(gatewaySnapshot, "session.typing") === true &&
       hasSessionPresenceViewers(
         this.presencePayload,
-        this.context.gateway.snapshot.client?.instanceId,
+        gatewaySnapshot.selfUser?.id,
+        gatewaySnapshot.client?.instanceId,
         state.sessionKey,
       );
     // Never flash "view-only" while metadata loads; after loading, anything short
@@ -191,10 +192,9 @@ export class ChatPane extends ChatPaneHeader {
       column.panels.some((panel) => panel.slot === "chat"),
     );
     const sidebarRegionCollapsed = isSidebarRegionCollapsed(sidebarLayout, this.paneWidth);
-    const primaryWidth = sidebarPrimaryWidth(sidebarLayout, this.paneWidth);
     const chatLayoutWidth = sidebarRegionCollapsed
       ? this.paneWidth
-      : (sidebarChatColumn?.width ?? primaryWidth);
+      : (sidebarChatColumn?.width ?? sidebarPrimaryWidth(sidebarLayout, this.paneWidth));
     const sessionWorkspace = createSessionWorkspaceProps(state, {
       draftScope: this.paneId,
       narrowLayout: chatLayoutWidth < WORKSPACE_RAIL_SIDE_MIN_PANE_WIDTH,
@@ -203,8 +203,7 @@ export class ChatPane extends ChatPaneHeader {
       !sessionWorkspace.collapsed &&
       !sessionWorkspace.narrowLayout &&
       sessionWorkspace.dock !== "bottom";
-    // The workspace rail claims the side slot first; the tasks rail needs
-    // room for both columns before it may side-dock next to it.
+    // The workspace rail claims the first side slot; tasks need room for both columns.
     const backgroundTasks = createBackgroundTasksProps(state, {
       narrowLayout:
         chatLayoutWidth <
@@ -214,13 +213,11 @@ export class ChatPane extends ChatPaneHeader {
       },
     });
     const tasksSideDocked = !backgroundTasks.collapsed && !backgroundTasks.narrowLayout;
-    // Side-docked workspace surfaces narrow the conversation region; bottom
-    // strips do not affect whether the session rail can dock beside it.
+    // Only side-docked rails narrow the conversation region.
     const sideRailCount = (railSideDocked ? 1 : 0) + (tasksSideDocked ? 1 : 0);
     const chatMainWidth = chatLayoutWidth - sideRailCount * WORKSPACE_RAIL_MAX_WIDTH;
     const selectedSessionRailMode =
       this.sessionRailModeSessionKey === state.sessionKey ? this.sessionRailMode : "hidden";
-    const gatewaySnapshot = this.context.gateway.snapshot;
     const selfUser = resolveCurrentSelfUser({
       snapshotUser: gatewaySnapshot.selfUser,
       presenceEntries: readPresenceEntries(gatewaySnapshot.hello?.snapshot),
@@ -231,7 +228,6 @@ export class ChatPane extends ChatPaneHeader {
       activeRunIds: selectedSession?.activeRunIds,
       usageByRun: state.chatRunUsageById,
     });
-    const loadSidebarFullMessage = createSidebarFullMessageLoader(state, Boolean(catalogKey));
     const projectionRunId = resolveChatProjectionRunId({
       localRunId: state.chatRunId,
       activeRunIds: selectedSession?.activeRunIds,
@@ -371,6 +367,10 @@ export class ChatPane extends ChatPaneHeader {
             }
           : undefined,
       sessions: state.sessionsResult,
+      toolOverrides: selectedSession?.toolOverrides,
+      capabilityMenu: catalogKey
+        ? undefined
+        : this.composerCapabilities.props(this.context, state, selectedSession, currentAgentId),
       swarmSessions: this.swarmHydrator?.rows ?? [],
       sessionHost: {
         assistantAgentId: state.assistantAgentId,
@@ -615,7 +615,7 @@ export class ChatPane extends ChatPaneHeader {
             detail: html`<openclaw-chat-detail-panel
               class="chat-sidebar"
               .content=${state.sidebarContent}
-              .loadFullMessage=${loadSidebarFullMessage}
+              .loadFullMessage=${createSidebarFullMessageLoader(state, Boolean(catalogKey))}
               .canvasPluginSurfaceUrl=${state.canvasPluginSurfaceUrl}
               .embedSandboxMode=${state.embedSandboxMode}
               .allowExternalEmbedUrls=${state.allowExternalEmbedUrls}

@@ -13,6 +13,7 @@ import { t } from "../../i18n/index.ts";
 import { APPEARANCE_SETTINGS_TARGET_IDS } from "./settings-targets.ts";
 import {
   renderChatPreferencesSection,
+  renderLanguageSection,
   renderLobsterPetSection,
   renderSidebarPreferencesSection,
 } from "./view-appearance-preferences.ts";
@@ -132,6 +133,7 @@ export function renderAppearanceSection(
         ${t("configView.appearance.intro")}
         ${renderDocsLink(APPEARANCE_DOCS_URL, t("common.learnMore"))}
       </p>
+      ${renderLanguageSection(props)}
       <section id=${APPEARANCE_SETTINGS_TARGET_IDS.theme} class="settings-section">
         <div class="settings-section__header">
           <h2 class="settings-section__heading">${t("configView.appearance.theme")}</h2>
@@ -149,6 +151,7 @@ export function renderAppearanceSection(
                     props.theme
                       ? "settings-theme-card--active"
                       : ""}"
+                    aria-pressed=${String(opt.id === props.theme)}
                     title=${opt.description}
                     @click=${(e: Event) => {
                       if (opt.id === "custom" && !props.hasCustomTheme) {
@@ -265,6 +268,7 @@ export function renderAppearanceSection(
                     <button
                       type="button"
                       class="settings-text-scale__btn ${stop === props.textScale ? "active" : ""}"
+                      aria-pressed=${String(stop === props.textScale)}
                       @click=${() => props.setTextScale(stop)}
                     >
                       <span class="settings-text-scale__sample">${t(TEXT_SCALE_LABELS[stop])}</span>

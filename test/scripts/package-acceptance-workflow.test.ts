@@ -2628,44 +2628,16 @@ describe("package artifact reuse", () => {
     ).filter((input) => input.startsWith("matrix_"));
     expect(matrixSpecificInputs).toEqual([]);
     expect(workflowStep(matrixJob, "Upload Matrix QA artifacts").with?.name).toBe(
-      "${{ inputs.expected_sha != '' && format('release-qa-live-matrix-{0}-shard-{1}-of-5', inputs.expected_sha, matrix.shard) || format('qa-live-matrix-{0}-{1}-shard-{2}-of-5', github.run_id, github.run_attempt, matrix.shard) }}",
+      "${{ inputs.expected_sha != '' && format('release-qa-live-matrix-{0}', inputs.expected_sha) || format('qa-live-matrix-{0}-{1}', github.run_id, github.run_attempt) }}",
     );
     expect(matrixJob["continue-on-error"]).toBeUndefined();
-    expect(matrixJob.strategy?.matrix?.shard).toEqual([1, 2, 3, 4, 5]);
-    expect(
-      workflowStep(matrixJob, "Verify internal Matrix execution sharding support").run,
-    ).toContain('grep -Fq "OPENCLAW_QA_EXECUTION_SHARD"');
-    expect(
-      workflowStep(matrixJob, "Verify internal Matrix execution sharding support").run,
-    ).toContain("does not support internal post-selection QA sharding");
-    expect(workflowStep(matrixJob, "Run Matrix live lane").env).toMatchObject({
-      OPENCLAW_QA_EXECUTION_SHARD: "${{ format('{0}/5', matrix.shard) }}",
+    expect(matrixJob.strategy).toBeUndefined();
+    expect(workflowStep(matrixJob, "Run Matrix live lane").env).toEqual({
+      OPENCLAW_QA_REDACT_PUBLIC_METADATA: "1",
     });
-    expect(readWorkflow(QA_LIVE_TRANSPORTS_WORKFLOW).jobs?.run_live_matrix_sharded).toBeUndefined();
     expect(releaseTelegramWorkflow).toContain(
       'echo "Telegram live lane failed on attempt ${attempt}; retrying once..." >&2',
     );
-    expect(workflowStep(matrixJob, "Run Matrix live lane").run).not.toContain("for attempt in");
-    expect(qaWorkflow).not.toContain("Matrix live lane failed on attempt");
-    expect(qaWorkflow).not.toContain("OPENCLAW_QA_MATRIX_CANARY_TIMEOUT_MS");
-    expect(qaWorkflow).not.toContain("legacy_profiles");
-    expect(qaWorkflow).not.toContain("matrix_selection");
-    expect(qaWorkflow).not.toContain("--shard <index/total>");
-    expect(qaWorkflow).not.toContain("--fail-fast");
-  });
-
-  it("keeps Matrix sharding internal to post-selection execution", () => {
-    const matrixJob = workflowJob(QA_LIVE_TRANSPORTS_WORKFLOW, "run_live_matrix");
-    const runStep = workflowStep(matrixJob, "Run Matrix live lane");
-    const run = runStep.run;
-
-    expect(runStep.env).toMatchObject({
-      OPENCLAW_QA_EXECUTION_SHARD: "${{ format('{0}/5', matrix.shard) }}",
-    });
-    expect(run).not.toContain("--shard");
-    expect(run).not.toContain("--profile");
-    expect(run).not.toContain("matrix_selection");
-    expect(matrixJob.strategy?.matrix?.shard).toEqual([1, 2, 3, 4, 5]);
   });
 
   it("runs live transport lanes nightly while release checks stay gated", () => {
@@ -4459,9 +4431,17 @@ wait_for_run plugin-clawhub-new.yml 123 "${expectedSha}" || status=$?
       "validate_macos_release_request",
     );
     const stepNames = validateJob.steps?.map((step) => step.name) ?? [];
+    const buildControlUi = validateJob.steps?.find((step) => step.name === "Build Control UI");
 
     expect(stepNames).not.toContain("Ensure matching GitHub release exists");
     expect(macosRelease.jobs?.validate_macos_release_request).toBeDefined();
+    expect(buildControlUi?.env?.OPENCLAW_CONTROL_UI_RELEASE_BUILD).toBe("1");
+  });
+
+  it("classifies fast pretag Control UI output as a release artifact", () => {
+    const script = readFileSync("scripts/release-fast-pretag-check.sh", "utf8");
+
+    expect(script).toContain("OPENCLAW_CONTROL_UI_RELEASE_BUILD=1 pnpm ui:build");
   });
 
   it("keeps every tracked repository skill visible to Git-aware syncs", () => {
@@ -4484,6 +4464,14 @@ wait_for_run plugin-clawhub-new.yml 123 "${expectedSha}" || status=$?
     expect(ignored.status).toBe(1);
     expect(ignored.stdout).toBe("");
     expect(ignored.stderr).toBe("");
+  });
+
+  it("does not track generated node_modules entries", () => {
+    const tracked = execFileSync("git", ["ls-files", "-z", "--", ":(glob)**/node_modules/**"], {
+      encoding: "utf8",
+    });
+
+    expect(tracked).toBe("");
   });
 
   it("keeps tracked sync metadata and QA Mantis sources visible to remote full syncs", () => {
