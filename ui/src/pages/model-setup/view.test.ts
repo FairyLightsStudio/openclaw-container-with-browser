@@ -23,13 +23,10 @@ const detected: SystemAgentSetupDetectResult = {
   ],
   unavailableCandidates: [
     {
-      id: "gemini-cli",
-      brandId: "google-gemini-cli",
-      label: "Gemini CLI",
-      detail: "installed; login status unavailable",
-      reason: "OpenClaw could not confirm a usable login.",
-      authOptionId: "google-gemini-cli",
-      manualProviderId: "gemini-api-key",
+      id: "pi-cli",
+      label: "Pi",
+      detail: "installed; no setup route available",
+      reason: "This local runtime must be configured outside OpenClaw.",
     },
   ],
   manualProviders: [
@@ -37,8 +34,8 @@ const detected: SystemAgentSetupDetectResult = {
       id: "gemini-api-key",
       brandId: "google",
       groupLabel: "Google",
-      label: "Google Gemini API key",
-      hint: "Use an AI Studio API key.",
+      label: "Google AI Studio API key",
+      hint: "Supported API-key access from aistudio.google.com/apikey",
     },
     {
       id: "openai",
@@ -50,15 +47,6 @@ const detected: SystemAgentSetupDetectResult = {
     },
   ],
   authOptions: [
-    {
-      id: "google-gemini-cli",
-      brandId: "google-gemini-cli",
-      label: "Gemini CLI OAuth",
-      groupLabel: "Google",
-      kind: "oauth",
-      featured: true,
-      hint: "Continue with Google.",
-    },
     {
       id: "openai-oauth",
       brandId: "openai",
@@ -81,6 +69,7 @@ const detected: SystemAgentSetupDetectResult = {
       brandId: "ollama",
       label: "Ollama",
       hint: "Connect to an Ollama server and select a cloud or local model",
+      actionLabel: "Choose connection",
       icon: "https://cdn.simpleicons.org/ollama",
       website: "https://ollama.com/download",
     },
@@ -89,6 +78,7 @@ const detected: SystemAgentSetupDetectResult = {
       brandId: "lmstudio",
       label: "LM Studio",
       hint: "Connect to a running LM Studio server and use an already loaded model",
+      actionLabel: "Connect server",
       icon: "https://cdn.simpleicons.org/lmstudio",
       website: "https://lmstudio.ai/download",
     },
@@ -97,6 +87,7 @@ const detected: SystemAgentSetupDetectResult = {
       brandId: "llama-cpp",
       label: "Local model (llama.cpp)",
       hint: "Download and run a private GGUF model",
+      actionLabel: "Review download",
     },
   ],
   recommendedInstalls: [
@@ -199,12 +190,12 @@ describe("renderModelSetup", () => {
 
   it("renders candidate, unavailable, sign-in, and manual sections", () => {
     const container = mount(props());
-    expect(text(container)).toContain("Connect your AI");
+    expect(text(container)).toContain("Connect a verified AI model");
     expect(text(container)).toContain("Found on this Gateway");
     expect(text(container)).toContain("Codex CLI");
     expect(text(container)).toContain("openai/gpt-5 · Signed in locally");
     expect(text(container)).toContain("Found, but needs attention");
-    expect(text(container)).toContain("OpenClaw could not confirm a usable login");
+    expect(text(container)).toContain("This local runtime must be configured outside OpenClaw");
     expect(text(container)).toContain("Sign in with a provider");
     expect(text(container)).toContain("Run a model locally");
     expect(text(container)).toContain("LM Studio");
@@ -217,9 +208,6 @@ describe("renderModelSetup", () => {
     );
     expect(container.querySelector('input[type="password"]')).not.toBeNull();
     expect(container.querySelector("details")?.open).toBe(false);
-    expect(
-      container.querySelector('[data-unavailable-candidate="gemini-cli"] [data-provider-icon]'),
-    ).not.toBeNull();
     expect(
       container.querySelector('[data-candidate-kind="codex-cli"] [data-provider-icon="codex"]'),
     ).not.toBeNull();
@@ -490,26 +478,16 @@ describe("renderModelSetup", () => {
     expect(onSuccessClose).toHaveBeenCalledOnce();
   });
 
-  it("offers direct recovery actions for an unavailable provider", () => {
-    const onStartAuth = vi.fn();
-    const onUseManualProvider = vi.fn();
+  it("only rechecks unavailable runtimes without a supported setup route", () => {
     const onDetect = vi.fn();
-    const container = mount(props({ onStartAuth, onUseManualProvider, onDetect }));
+    const container = mount(props({ onDetect }));
     const buttons = container.querySelectorAll<HTMLButtonElement>(
-      '[data-unavailable-candidate="gemini-cli"] button',
+      '[data-unavailable-candidate="pi-cli"] button',
     );
 
-    expect([...buttons].map((button) => button.textContent?.trim())).toEqual([
-      "Sign in with Google",
-      "Use API key",
-      "Check again",
-    ]);
+    expect([...buttons].map((button) => button.textContent?.trim())).toEqual(["Check again"]);
     buttons[0]?.click();
-    buttons[1]?.click();
-    buttons[2]?.click();
 
-    expect(onStartAuth).toHaveBeenCalledWith(expect.objectContaining({ id: "google-gemini-cli" }));
-    expect(onUseManualProvider).toHaveBeenCalledWith("gemini-api-key");
     expect(onDetect).toHaveBeenCalledOnce();
   });
 
@@ -523,8 +501,12 @@ describe("renderModelSetup", () => {
     const llamaCpp = container.querySelector<HTMLButtonElement>(
       '[data-prepare-choice="llama-cpp"] button',
     );
-    expect(ollama?.textContent).toContain("Check & set up");
-    expect(llamaCpp?.textContent).toContain("Check & set up");
+    expect(ollama?.textContent).toContain("Choose connection");
+    expect(llamaCpp?.textContent).toContain("Review download");
+    expect(
+      container.querySelector<HTMLButtonElement>('[data-prepare-choice="lmstudio"] button')
+        ?.textContent,
+    ).toContain("Connect server");
     const llamaCppRow = container.querySelector('[data-prepare-choice="llama-cpp"]');
     expect(llamaCppRow?.querySelector('[data-provider-icon="llamacpp"]')).not.toBeNull();
     expect(text(llamaCppRow!)).toContain("llama.cpp");
