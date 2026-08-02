@@ -98,7 +98,6 @@ import {
   shouldUseWhatsAppContactMarker,
   shouldUseWhatsAppStickerMarker,
   extractBlockStreamingMarkerDirectives,
-  hasDeclaredCustomTool,
   hasDeclaredTool,
   hasToolDefinition,
   isQaToolSearchFixture,
@@ -406,7 +405,24 @@ function buildScenarioToolCallEvents(
     hasToolDefinition(body, name) ||
     !hasCodeModeExecSurface(body)
   ) {
-    return buildRawToolCallEventsWithArgs(name, args);
+    const declaration = [
+      ...(Array.isArray(body.tools) ? body.tools : []),
+      ...(Array.isArray(body.dynamicTools) ? body.dynamicTools : []),
+    ].find((tool) => findNamedToolDefinition(tool, name));
+    const definition = findNamedToolDefinition(declaration, name);
+    // Function and custom calls both retain their declared namespace; Codex
+    // dispatches the complete identity and rejects a flattened nested tool.
+    const namespace =
+      declaration &&
+      typeof declaration === "object" &&
+      declaration.type === "namespace" &&
+      typeof declaration.name === "string"
+        ? declaration.name
+        : undefined;
+    if (definition?.type === "custom" && typeof args.input === "string") {
+      return buildCustomToolCallEventsWithInput(name, args.input, namespace);
+    }
+    return buildRawToolCallEventsWithArgs(name, args, namespace);
   }
   const encodedTarget = encodeCodeModeTarget(name, args);
   return buildRawToolCallEventsWithArgs("exec", {
@@ -561,11 +577,11 @@ async function buildResponsesPayload(
       ? buildQaToolSearchArgs(targetTool, QA_TOOL_SEARCH_FAILURE_PROMPT_RE.test(allInputText))
       : {};
     if (
-      targetTool === "apply_patch" &&
-      hasDeclaredCustomTool(body, targetTool) &&
+      targetTool &&
+      findNamedToolDefinition(toolDeclarationBody, targetTool)?.type === "custom" &&
       typeof plannedArgs.input === "string"
     ) {
-      return buildCustomToolCallEventsWithInput(targetTool, plannedArgs.input);
+      return buildToolCallEventsWithArgs(targetTool, plannedArgs);
     }
     if (targetTool && hasDeclaredTool(body, "tool_search_code")) {
       return buildToolCallEventsWithArgs("tool_search_code", {
@@ -681,9 +697,11 @@ async function buildResponsesPayload(
   if (QA_SUBAGENT_DIRECT_FALLBACK_WORKER_RE.test(prompt)) {
     return buildAssistantEvents(QA_SUBAGENT_DIRECT_FALLBACK_MARKER);
   }
+  // Protected completion context is excluded from the current user prompt;
+  // ignoring it replays the historical kickoff and recursively spawns workers.
   if (
-    prompt.includes(QA_SUBAGENT_DIRECT_FALLBACK_MARKER) &&
-    /Internal task completion event/i.test(prompt)
+    allInputText.includes(QA_SUBAGENT_DIRECT_FALLBACK_MARKER) &&
+    /Internal task completion event/i.test(allInputText)
   ) {
     return buildAssistantEvents("");
   }
@@ -1498,14 +1516,10 @@ async function buildResponsesPayload(
     });
   }
   const isSubagentFanoutPrompt = /subagent fanout synthesis check/i.test(allInputText);
-  const currentFanoutInstructions = [
-    extractInstructionsText(body),
-    extractAllInputTexts(
-      input.filter((item) => item.role === "system" || item.role === "developer"),
-    ),
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const currentFanoutInstructions = extractAllRequestTexts(
+    input.filter((item) => item.role === "system" || item.role === "developer"),
+    body,
+  );
   const fanoutRequiresFinalMessage =
     /visible source replies are not automatically delivered for this run\.\s*use `?message\(action=send\)`?[\s\S]*set `?final=true`?/i.test(
       currentFanoutInstructions,
