@@ -46,6 +46,7 @@ export function createHarness(
     destroyFailureState?: "draining" | "destroying";
     terminalizeReclaimOnTunnelDrop?: boolean;
     terminalizedReclaimError?: Error;
+    environmentGeneration?: number;
   } = {},
 ) {
   const reconciledManifestRef = MANIFEST_REF.replaceAll("b", "c");
@@ -90,6 +91,14 @@ export function createHarness(
         log.push("placement:reclaimed");
       }
       return completed;
+    },
+    failWorkspaceResultAndReleaseTurn: (pending, error) => {
+      const current = placementStore.get(pending.sessionId);
+      if (current?.state === "active") {
+        log.push("placement:draining");
+      }
+      log.push("placement:reconciling", "placement:failed");
+      return placementStore.failWorkspaceResultAndReleaseTurn(pending, error);
     },
     abandonWorkspaceResult: (pending) => placementStore.abandonWorkspaceResult(pending),
     releaseTurn: (claim) => placementStore.releaseTurn(claim),
@@ -156,7 +165,7 @@ export function createHarness(
     },
   };
   const { attached, destroyedEnvironment, environmentId, ready } =
-    createDispatchEnvironmentFixtures();
+    createDispatchEnvironmentFixtures(options.environmentGeneration);
   let currentEnvironment: ReturnType<WorkerDispatchEnvironmentService["get"]> = ready;
   const tunnelHandle = (ownerEpoch: number): WorkerTunnelHandle => ({
     environmentId: ready.environmentId,
@@ -366,6 +375,17 @@ export function createHarness(
     reportWorkspaceResultConflict,
     markEnvironmentDestroyed: () => {
       currentEnvironment = destroyedEnvironment((currentEnvironment?.ownerEpoch ?? 1) + 1);
+    },
+    markEnvironmentFailed: () => {
+      currentEnvironment = {
+        ...destroyedEnvironment(currentEnvironment?.ownerEpoch ?? 1),
+        state: "failed",
+        leaseId: null,
+        sshEndpoint: null,
+        sharedHost: null,
+        lastError: "Worker environment disappeared before teardown was requested",
+        error: "Worker environment disappeared before teardown was requested",
+      };
     },
     markEnvironmentOwnerEpoch: (ownerEpoch: number) => {
       currentEnvironment = { ...attached, ownerEpoch };
