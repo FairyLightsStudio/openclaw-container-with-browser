@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WORKER_LAUNCH_V2_PROTOCOL_FEATURE } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
 import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
@@ -461,6 +462,30 @@ describe("worker placement dispatch", () => {
     expect(harness.log).toContain("workspace:resume");
   });
 
+  it("preserves a provider destroy failure after teardown owns the stopped tunnel", async () => {
+    const harness = createHarness(placementStore, {
+      destroyFails: true,
+      destroyFailureState: "destroying",
+      resumeFails: true,
+    });
+    const active = await harness.service.dispatch(REQUEST);
+
+    await expect(harness.service.reclaim(REQUEST)).rejects.toThrow("destroy pending");
+
+    expect(harness.environments.get(active.environmentId)).toMatchObject({
+      state: "destroying",
+      ownerEpoch: active.activeOwnerEpoch,
+    });
+    expect(harness.placements.current()).toMatchObject({
+      state: "active",
+      turnClaim: { owner: "worker" },
+    });
+    expect(placementStore.listPendingWorkspaceResults()).toMatchObject([
+      { workspaceAcceptedAtMs: expect.any(Number) },
+    ]);
+    expect(harness.log).not.toContain("workspace:resume");
+  });
+
   it.each<DispatchStage>([
     "barrier",
     "workspace",
@@ -487,6 +512,27 @@ describe("worker placement dispatch", () => {
     if (environmentAcquired) {
       expect(failedAt).toBeGreaterThan(harness.log.indexOf("teardown:destroy"));
     }
+  });
+
+  it("rejects workspace preflight before allocation and allows a corrected redispatch", async () => {
+    const rejectedHarness = createHarness(placementStore, { failAt: "preflight" });
+
+    await expect(rejectedHarness.service.dispatch(REQUEST)).rejects.toMatchObject({
+      code: "invalid_state",
+      message: "preflight failed",
+    });
+
+    expect(rejectedHarness.placements.current()).toBeUndefined();
+    expect(rejectedHarness.log).toEqual(["barrier", "preflight"]);
+    expect(rejectedHarness.environments.create).not.toHaveBeenCalled();
+
+    const correctedHarness = createHarness(placementStore);
+    const active = await correctedHarness.service.dispatch(REQUEST);
+
+    expect(active.state).toBe("active");
+    expect(correctedHarness.log.indexOf("preflight")).toBeLessThan(
+      correctedHarness.log.indexOf("placement:requested"),
+    );
   });
 
   it.each(["requested", "provisioning", "syncing"] as const)(
@@ -561,6 +607,19 @@ describe("worker placement dispatch", () => {
     expect(harness.log).not.toContain("teardown:destroy");
   });
 
+  it("rejects and tears down a freshly provisioned bundle without execution context", async () => {
+    const harness = createHarness(placementStore);
+    harness.markEnvironmentProtocolFeatures([WORKER_LAUNCH_V2_PROTOCOL_FEATURE]);
+
+    await expect(harness.service.dispatch(REQUEST)).rejects.toThrow(
+      "current execution-context contract",
+    );
+
+    expect(harness.placements.current()).toMatchObject({ state: "failed" });
+    expect(harness.environments.startTunnel).not.toHaveBeenCalled();
+    expect(harness.environments.destroy).toHaveBeenCalledOnce();
+  });
+
   it("persists pending teardown evidence after placement is fenced", async () => {
     const harness = createHarness(placementStore, { failAt: "sync", destroyFails: true });
 
@@ -595,7 +654,7 @@ describe("worker placement dispatch", () => {
     expect(harness.environments.destroy).not.toHaveBeenCalled();
   });
 
-  it("reclaims an active pre-v2 worker instead of adopting its stale launch contract", async () => {
+  it("reclaims an active worker missing execution context instead of adopting it", async () => {
     const harness = createHarness(placementStore);
     await harness.environments.attachSession({
       environmentId: harness.ready.environmentId,
@@ -603,7 +662,7 @@ describe("worker placement dispatch", () => {
       sessionId: REQUEST.sessionId,
     });
     harness.placements.seedActive(harness.attached.ownerEpoch);
-    harness.markEnvironmentProtocolFeatures([]);
+    harness.markEnvironmentProtocolFeatures([WORKER_LAUNCH_V2_PROTOCOL_FEATURE]);
 
     await harness.service.reconcile();
 
@@ -739,10 +798,10 @@ describe("worker placement dispatch", () => {
     expect(harness.environments.create).not.toHaveBeenCalled();
   });
 
-  it("tears down a starting pre-v2 worker instead of resuming its stale launch contract", async () => {
+  it("tears down a starting worker missing execution context instead of resuming it", async () => {
     const harness = createHarness(placementStore);
     harness.placements.seedStarting();
-    harness.markEnvironmentProtocolFeatures([]);
+    harness.markEnvironmentProtocolFeatures([WORKER_LAUNCH_V2_PROTOCOL_FEATURE]);
 
     await harness.service.reconcile();
 

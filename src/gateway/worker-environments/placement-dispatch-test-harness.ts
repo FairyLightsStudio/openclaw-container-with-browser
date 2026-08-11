@@ -58,7 +58,11 @@ export function createHarness(
   const fail = (stage: DispatchStage) => {
     log.push(stage);
     if (options.failAt === stage) {
-      throw new Error(`${stage} failed`);
+      const error = new Error(`${stage} failed`);
+      if (stage === "preflight") {
+        Object.assign(error, { code: "invalid_state" });
+      }
+      throw error;
     }
   };
   const placements: WorkerDispatchPlacementStore = {
@@ -290,7 +294,7 @@ export function createHarness(
   const environments: WorkerDispatchEnvironmentService = {
     create: vi.fn(async () => {
       fail("create");
-      return ready;
+      return currentEnvironment ?? ready;
     }),
     get: vi.fn(() => currentEnvironment),
     attachSession: vi.fn(async () => {
@@ -331,6 +335,9 @@ export function createHarness(
     workspaceOperations: options.workspaceOperations ?? createWorkerWorkspaceOperationCoordinator(),
     runLocalBarrier: async ({ startDispatch }) => {
       log.push("barrier");
+      if (options.failAt === "preflight") {
+        fail("preflight");
+      }
       const placement = startDispatch();
       if (options.failAt === "barrier") {
         throw new Error("barrier failed");
