@@ -84,6 +84,7 @@ import {
   detectChangedLanes,
   listChangedPathsFromGit as listChangedPathsFromGitSource,
 } from "./changed-lanes.mts";
+import { parsePermissiveBooleanToken } from "./lib/arg-utils.mts";
 import { getChangedPathFacts } from "./lib/changed-path-facts.mjs";
 import { createExtensionTestProcessTargetChunks } from "./lib/extension-test-plan.mts";
 import {
@@ -698,10 +699,6 @@ const SOURCE_TEST_TARGETS = new Map([
   ],
   ["src/commands/doctor-memory-search.ts", ["src/commands/doctor-memory-search.test.ts"]],
   [
-    "src/commitments/model-selection.runtime.ts",
-    ["src/commitments/runtime.test.ts", "src/agents/model-selection.test.ts"],
-  ],
-  [
     "src/agents/test-helpers/live-model-turn-probes.ts",
     ["src/agents/live-model-turn-probes.test.ts"],
   ],
@@ -1004,12 +1001,12 @@ export function isTestFileTarget(arg: string) {
   return /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(arg);
 }
 
-function isTestSupportFileTarget(arg: string) {
+export function isTestSupportFileTarget(arg: string) {
   if (/(?:^|\/)(?:test-helpers|test-support)(?:\/|$)/u.test(arg)) {
     return true;
   }
   const basename = path.posix.basename(arg).replace(/\.[cm]?[jt]sx?$/u, "");
-  return /(?:^|[._-])test-(?:helpers|support)(?:[._-]|$)/u.test(basename);
+  return /(?:^|[._-])(?:suite|test-(?:helpers|support))(?:[._-]|$)/u.test(basename);
 }
 
 function isLikelyFileTarget(arg: string) {
@@ -2905,8 +2902,7 @@ function resolveToolingTestTargets(changedPath: string, cwd = process.cwd()) {
 }
 
 function shouldUseBroadChangedTargets(env = process.env) {
-  const value = env[BROAD_CHANGED_ENV_KEY]?.trim().toLowerCase();
-  return ["1", "true", "yes", "on"].includes(value ?? "");
+  return parsePermissiveBooleanToken(env[BROAD_CHANGED_ENV_KEY]) === true;
 }
 
 function isRoutableChangedTarget(changedPath: string) {
@@ -3152,6 +3148,16 @@ function classifyTarget(arg: string, cwd: string) {
   if (relative.startsWith("src/plugins/contracts/")) {
     return "contractsPlugin";
   }
+  // These tests share stateful runner mocks and must keep the dedicated serial
+  // owner even when their contents also qualify for a unit-fast lane.
+  if (agentVitestProjectOwners.embeddedIncompleteTurn.include.includes(relative)) {
+    return agentVitestProjectOwners.embeddedIncompleteTurn.kind;
+  }
+  // Explicit isolation ownership wins over inferred unit-fast eligibility.
+  // Otherwise a thin wrapper can move a stateful tooling test into a shared worker.
+  if (isToolingIsolatedTestFile(relative)) {
+    return "toolingIsolated";
+  }
   if (resolveUnitFastTimerTestIncludePattern(relative)) {
     return "unitFastFakeTimers";
   }
@@ -3240,9 +3246,6 @@ function classifyTarget(arg: string, cwd: string) {
   }
   if (isBoundaryTestFile(relative)) {
     return "boundary";
-  }
-  if (isToolingIsolatedTestFile(relative)) {
-    return "toolingIsolated";
   }
   if (relative === TOOLING_DOCKER_TEST_TARGET) {
     return "toolingDocker";
@@ -3336,9 +3339,6 @@ function classifyTarget(arg: string, cwd: string) {
       relative === AGENTS_EMBEDDED_AGENT_TEST_ROOT
     ) {
       return agentVitestProjectOwners.all.kind;
-    }
-    if (agentVitestProjectOwners.embeddedIncompleteTurn.include.includes(relative)) {
-      return agentVitestProjectOwners.embeddedIncompleteTurn.kind;
     }
     if (agentVitestProjectOwners.embeddedOverflowCompaction.include.includes(relative)) {
       return agentVitestProjectOwners.embeddedOverflowCompaction.kind;

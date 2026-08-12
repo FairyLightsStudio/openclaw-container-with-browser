@@ -8,9 +8,10 @@ import {
 } from "../test-utils/talk-test-provider.js";
 import { getCoreSecretTargetRegistry } from "./target-registry-data.js";
 import {
+  discoverConfigSecretTargets,
   discoverConfigSecretTargetsByIds,
   resolveConfigSecretTargetByPath,
-  resolveSecretPlanTargetByPath,
+  resolveSecretPlanTargetByPathCore,
 } from "./target-registry.js";
 
 describe("secret target registry", () => {
@@ -62,11 +63,11 @@ describe("secret target registry", () => {
   });
 
   it("resolves plan targets by owning config document", () => {
-    const configTarget = resolveSecretPlanTargetByPath({
+    const configTarget = resolveSecretPlanTargetByPathCore({
       configFile: "openclaw.json",
       pathSegments: ["models", "providers", "openai", "apiKey"],
     });
-    const authProfileTarget = resolveSecretPlanTargetByPath({
+    const authProfileTarget = resolveSecretPlanTargetByPathCore({
       configFile: "auth-profiles.json",
       pathSegments: ["profiles", "openai:default", "key"],
     });
@@ -101,6 +102,21 @@ describe("secret target registry", () => {
       "apiKey",
     ]);
     expect(fetchTarget?.entry?.id).toBe("plugins.entries.firecrawl.config.webFetch.apiKey");
+
+    const configuredTargets = discoverConfigSecretTargets({
+      plugins: {
+        entries: {
+          exa: {
+            config: {
+              webSearch: { apiKey: "configured-plugin-key" },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig);
+    expect(configuredTargets.map((entry) => entry.entry.id)).toContain(
+      "plugins.entries.exa.config.webSearch.apiKey",
+    );
   });
 
   it("derives bundled plugin SecretInput contract target paths from plugin manifests", () => {
