@@ -143,6 +143,10 @@ export {
   WorkerDesktopObserveResultSchema,
   WorkerDesktopLaunchParamsSchema,
   WorkerDesktopLaunchResultSchema,
+  DesktopSourceSchema,
+  DesktopObserveParamsSchema,
+  DesktopObserveResultSchema,
+  DesktopLaunchParamsSchema,
   SystemInfoParamsSchema,
   SystemInfoResultSchema,
   StateVersionSchema,
@@ -244,8 +248,10 @@ export {
   SessionsFilesListResultSchema,
   SessionsFilesRevealParamsSchema,
   SessionsFilesRevealResultSchema,
+  SessionDiffCommitSchema,
   SessionDiffFileSchema,
   SessionDiffFileStatusSchema,
+  SessionDiffScopeSchema,
   SessionsDiffParamsSchema,
   SessionsDiffResultSchema,
   SessionsCompactionListParamsSchema,
@@ -292,6 +298,8 @@ export {
   SessionWorktreeInfoSchema,
   SessionsCreateParamsSchema,
   SessionsCreateResultSchema,
+  SessionsRecoverParamsSchema,
+  SessionsRecoverResultSchema,
   SessionsDispatchParamsSchema,
   SessionsDispatchResultSchema,
   SessionsReclaimParamsSchema,
@@ -682,18 +690,4 @@ export {
   PROTOCOL_VERSION,
 } from "./version.js";
 export type * from "./schema-types.js";
-
-// Local structural result keeps this package independent of core session types.
-export type SessionsPatchResult = {
-  ok: true;
-  path: string;
-  key: string;
-  entry: Record<string, unknown>;
-  resolved?: {
-    modelProvider?: string;
-    model?: string;
-    agentRuntime?: import("./schema/agents-models-skills.js").GatewayAgentRuntime;
-    thinkingLevel?: string;
-    thinkingLevels?: Array<{ id: string; label: string }>;
-  };
-};
+export type { SessionsPatchResult } from "./sessions-patch-result.js";
