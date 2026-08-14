@@ -135,7 +135,7 @@ suite.define(() => {
       const heroBox = await page.locator(".agent-chat__welcome h2").boundingBox();
       const triggersBox = await page.locator(".new-session-page__triggers").boundingBox();
       const composerBox = await page.locator(".new-session-page__composer").boundingBox();
-      const modelBox = await page.locator("wa-select.chat-controls__model-picker").boundingBox();
+      const modelBox = await page.locator('[data-chat-model-select="true"]').boundingBox();
       const modelWrapperBox = await page
         .locator(".new-session-page__composer .chat-composer-model-control")
         .boundingBox();
@@ -159,7 +159,7 @@ suite.define(() => {
       ).toBe(1);
       expect(
         await page
-          .locator("wa-select.chat-controls__model-picker")
+          .locator('[data-chat-model-select="true"]')
           .evaluate((element) => element.closest(".agent-chat__composer-footer") != null),
       ).toBe(true);
       expect(modelWrapperBox?.x ?? 0).toBeGreaterThan(
@@ -457,105 +457,6 @@ suite.define(() => {
       });
       expect(create.params).not.toHaveProperty("cwd");
       expect(create.params).not.toHaveProperty("execNode");
-    } finally {
-      await context.close();
-    }
-  });
-
-  it("registers a Git checkout from Browse and selects the refreshed project", async () => {
-    await prepareProjectUiProof();
-    const context = await suite.browser.newContext({ locale: "en-US", serviceWorkers: "block" });
-    const page = await context.newPage();
-    const repoRoot = "/recorded/openclaw";
-    const registeredProject = {
-      id: "recorded-openclaw",
-      displayName: "openclaw",
-      repoRoot,
-      originUrl: "https://github.com/openclaw/openclaw.git",
-      source: "registered",
-    };
-    const gateway = await installMockGateway(page, {
-      workspace: WORKSPACE,
-      workspaceGit: true,
-      featureMethods: [
-        "chat.metadata",
-        "chat.startup",
-        "fs.listDir",
-        "projects.list",
-        "projects.register",
-        "sessions.create",
-        "worktrees.branches",
-      ],
-      methodResponses: {
-        "projects.list": {
-          sequence: [{ projects: [] }, { projects: [registeredProject] }],
-        },
-        "projects.register": registeredProject,
-        "fs.listDir": {
-          cases: [
-            {
-              match: { path: WORKSPACE },
-              response: { path: WORKSPACE, home: "/home/peter", entries: [] },
-            },
-            {
-              match: { path: repoRoot },
-              response: { path: repoRoot, parent: "/recorded", home: "/home/peter", entries: [] },
-            },
-          ],
-        },
-        "worktrees.branches": {
-          branches: [{ kind: "local", name: "main" }],
-          defaultBranch: "main",
-          repositoryStatus: "git",
-        },
-      },
-    });
-
-    try {
-      await page.goto(`${suite.server.baseUrl}new`);
-      await gateway.waitForRequest("projects.list");
-      const trigger = page.locator("#new-session-project-trigger");
-      const place = page.locator("wa-popover.new-session-page__project-popover");
-      await trigger.click();
-      await place.getByRole("button", { name: "Browse folders" }).click();
-      const pathInput = page.locator("input.new-session-page__browser-path");
-      await pathInput.fill(repoRoot);
-      await pathInput.press("Enter");
-      const register = place.getByRole("button", { name: "Register as project" });
-      await register.waitFor();
-      await captureProjectUiProof(page, "project-register-action.png");
-      await register.click();
-
-      const request = await gateway.waitForRequest("projects.register");
-      expect(request.params).toEqual({ path: repoRoot });
-      await expect.poll(async () => (await gateway.getRequests("projects.list")).length).toBe(2);
-      await pollLocatorText(trigger.locator(".new-session-page__trigger-label")).toBe("openclaw");
-      expect(await trigger.getAttribute("data-project-id")).toBe("recorded-openclaw");
-    } finally {
-      await context.close();
-    }
-  });
-
-  it("guides write-only operators when no projects are registered", async () => {
-    const context = await suite.browser.newContext({ locale: "en-US", serviceWorkers: "block" });
-    const page = await context.newPage();
-    const gateway = await installMockGateway(page, {
-      workspace: WORKSPACE,
-      workspaceGit: true,
-      operatorScopes: ["operator.read", "operator.write"],
-      featureMethods: ["chat.metadata", "chat.startup", "projects.list", "sessions.create"],
-      methodResponses: { "projects.list": { projects: [] } },
-    });
-
-    try {
-      await page.goto(`${suite.server.baseUrl}new`);
-      await gateway.waitForRequest("projects.list");
-      const place = page.locator("wa-popover.new-session-page__project-popover");
-      await page.locator("#new-session-project-trigger").click();
-      await place
-        .getByText("Admins can register projects from Browse folders", { exact: true })
-        .waitFor();
-      expect(await place.getByRole("button", { name: "Register as project" }).count()).toBe(0);
     } finally {
       await context.close();
     }

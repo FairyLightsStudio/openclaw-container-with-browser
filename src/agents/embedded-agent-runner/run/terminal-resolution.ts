@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { isCompactionReplayCheckpoint } from "@openclaw/ai/transports";
 import { SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
 import { freezeDiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import type { AssistantMessage } from "../../../llm/types.js";
@@ -53,6 +54,28 @@ const COMPACTION_CONTINUATION_RETRY_INSTRUCTION =
   "The previous attempt compacted the conversation context before producing a final user-visible answer. Continue from the compacted transcript and produce the final answer now. Do not restart from scratch, do not repeat completed work, and do not rerun tools unless the transcript clearly lacks required evidence.";
 const BEFORE_AGENT_FINALIZE_RETRY_PROMPT_PREFIX =
   "Before accepting the previous final answer, apply this revision request and produce the revised final answer. Do not repeat completed work or rerun tools unless the request explicitly requires it.";
+
+type TerminalPresentationObservation = {
+  terminalPresentation?: string;
+  toolCallOrdinal?: number;
+};
+
+export function createTerminalToolPresentationTracker() {
+  let latestOrdinal = -1;
+  let nextOrdinal = 0;
+  let value: string | undefined;
+  return {
+    allocateOrdinal: () => nextOrdinal++,
+    observe: (observation: TerminalPresentationObservation): void => {
+      const ordinal = observation.toolCallOrdinal ?? latestOrdinal + 1;
+      if (ordinal >= latestOrdinal) {
+        latestOrdinal = ordinal;
+        value = observation.terminalPresentation;
+      }
+    },
+    read: () => value,
+  };
+}
 
 type TerminalRunParams = RunEmbeddedAgentParams & {
   authProfileStateMode?: "read-write" | "read-only";
@@ -340,7 +363,7 @@ export async function resolveEmbeddedRunTerminal(input: {
     !emptyAssistantReplyIsSilent &&
     !settledTurnFinalizationAttempted &&
     (input.attemptCompactionCount > 0 ||
-      attempt.currentAttemptAssistant?.providerReplay?.type === "openai-responses-compaction") &&
+      isCompactionReplayCheckpoint(attempt.currentAttemptAssistant?.providerReplay)) &&
     payloadCount === 0 &&
     !terminalInterrupted &&
     !promptError &&
