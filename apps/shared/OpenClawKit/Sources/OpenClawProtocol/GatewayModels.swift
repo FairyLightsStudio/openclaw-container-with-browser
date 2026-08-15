@@ -194,22 +194,6 @@ public enum TaskSuggestionResolution: String, Codable, Sendable {
     case expired = "expired"
 }
 
-public enum DeliveryFailureResubmitReason: String, Codable, Sendable {
-    case notFound = "not_found"
-    case notFailed = "not_failed"
-    case legacyUnknown = "legacy_unknown"
-    case compacted = "compacted"
-    case ownerManaged = "owner_managed"
-    case ambiguous = "ambiguous"
-    case fenced = "fenced"
-    case missingPayload = "missing_payload"
-    case missingMedia = "missing_media"
-    case ownershipChanged = "ownership_changed"
-    case migrationNamespace = "migration_namespace"
-    case unsupportedQueue = "unsupported_queue"
-    case ambiguousQueue = "ambiguous_queue"
-}
-
 public enum SystemChangeKind: String, Codable, Sendable {
     case operation = "operation"
     case configWrite = "config-write"
@@ -1155,6 +1139,7 @@ public struct ConnectParams: Codable, Sendable {
     public let client: [String: AnyCodable]
     public let caps: [String]?
     public let commands: [String]?
+    public let computeruse: AnyCodable?
     public let workerruns: WorkerAdmissionHandshake?
     public let permissions: [String: AnyCodable]?
     public let pathenv: String?
@@ -1171,6 +1156,7 @@ public struct ConnectParams: Codable, Sendable {
         client: [String: AnyCodable],
         caps: [String]? = nil,
         commands: [String]? = nil,
+        computeruse: AnyCodable? = nil,
         workerruns: WorkerAdmissionHandshake? = nil,
         permissions: [String: AnyCodable]? = nil,
         pathenv: String? = nil,
@@ -1186,6 +1172,7 @@ public struct ConnectParams: Codable, Sendable {
         self.client = client
         self.caps = caps
         self.commands = commands
+        self.computeruse = computeruse
         self.workerruns = workerruns
         self.permissions = permissions
         self.pathenv = pathenv
@@ -1203,6 +1190,7 @@ public struct ConnectParams: Codable, Sendable {
         case client
         case caps
         case commands
+        case computeruse = "computerUse"
         case workerruns = "workerRuns"
         case permissions
         case pathenv = "pathEnv"
@@ -8449,6 +8437,7 @@ public struct SessionsCreateParams: Codable, Sendable {
     public let key: String?
     public let agentid: String?
     public let label: String?
+    public let category: String?
     public let model: String?
     public let thinkinglevel: String?
     public let incognito: Bool?
@@ -8457,6 +8446,7 @@ public struct SessionsCreateParams: Codable, Sendable {
     public let parentsessionkey: String?
     public let spawndepth: Int?
     public let fork: Bool?
+    public let forkfrom: String?
     public let emitcommandhooks: Bool?
     public let succeedsparent: Bool?
     public let task: String?
@@ -8473,6 +8463,7 @@ public struct SessionsCreateParams: Codable, Sendable {
         key: String? = nil,
         agentid: String? = nil,
         label: String? = nil,
+        category: String? = nil,
         model: String? = nil,
         thinkinglevel: String? = nil,
         incognito: Bool? = nil,
@@ -8481,6 +8472,7 @@ public struct SessionsCreateParams: Codable, Sendable {
         parentsessionkey: String? = nil,
         spawndepth: Int? = nil,
         fork: Bool? = nil,
+        forkfrom: String? = nil,
         emitcommandhooks: Bool? = nil,
         succeedsparent: Bool? = nil,
         task: String? = nil,
@@ -8496,6 +8488,7 @@ public struct SessionsCreateParams: Codable, Sendable {
         self.key = key
         self.agentid = agentid
         self.label = label
+        self.category = category
         self.model = model
         self.thinkinglevel = thinkinglevel
         self.incognito = incognito
@@ -8504,6 +8497,7 @@ public struct SessionsCreateParams: Codable, Sendable {
         self.parentsessionkey = parentsessionkey
         self.spawndepth = spawndepth
         self.fork = fork
+        self.forkfrom = forkfrom
         self.emitcommandhooks = emitcommandhooks
         self.succeedsparent = succeedsparent
         self.task = task
@@ -8521,6 +8515,7 @@ public struct SessionsCreateParams: Codable, Sendable {
         case key
         case agentid = "agentId"
         case label
+        case category
         case model
         case thinkinglevel = "thinkingLevel"
         case incognito
@@ -8529,6 +8524,7 @@ public struct SessionsCreateParams: Codable, Sendable {
         case parentsessionkey = "parentSessionKey"
         case spawndepth = "spawnDepth"
         case fork
+        case forkfrom = "forkFrom"
         case emitcommandhooks = "emitCommandHooks"
         case succeedsparent = "succeedsParent"
         case task
@@ -9225,6 +9221,28 @@ public struct SessionGroup: Codable, Sendable {
     }
 }
 
+public struct SessionGroupDefaults: Codable, Sendable {
+    public let name: String
+    public let cwd: String?
+    public let worktree: Bool?
+
+    public init(
+        name: String,
+        cwd: String? = nil,
+        worktree: Bool? = nil)
+    {
+        self.name = name
+        self.cwd = cwd
+        self.worktree = worktree
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case cwd
+        case worktree
+    }
+}
+
 public struct SessionsGroupsListParams: Codable, Sendable {}
 
 public struct SessionsGroupsListResult: Codable, Sendable {
@@ -9242,6 +9260,22 @@ public struct SessionsGroupsListResult: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case groups
         case sectionorder = "sectionOrder"
+    }
+}
+
+public struct SessionsGroupsDefaultsParams: Codable, Sendable {}
+
+public struct SessionsGroupsDefaultsResult: Codable, Sendable {
+    public let defaults: [SessionGroupDefaults]
+
+    public init(
+        defaults: [SessionGroupDefaults])
+    {
+        self.defaults = defaults
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case defaults
     }
 }
 
@@ -9278,6 +9312,46 @@ public struct SessionsGroupsRenameParams: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case name
         case to
+    }
+}
+
+public struct SessionsGroupsUpdateParams: Codable, Sendable {
+    public let name: String
+    public let cwd: AnyCodable
+    public let worktree: Bool
+
+    public init(
+        name: String,
+        cwd: AnyCodable,
+        worktree: Bool)
+    {
+        self.name = name
+        self.cwd = cwd
+        self.worktree = worktree
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case cwd
+        case worktree
+    }
+}
+
+public struct SessionsGroupsUpdateResult: Codable, Sendable {
+    public let ok: Bool
+    public let defaults: [SessionGroupDefaults]
+
+    public init(
+        ok: Bool,
+        defaults: [SessionGroupDefaults])
+    {
+        self.ok = ok
+        self.defaults = defaults
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case defaults
     }
 }
 
@@ -10956,68 +11030,6 @@ public struct ConfigSchemaLookupResult: Codable, Sendable {
         case hint
         case hintpath = "hintPath"
         case children
-    }
-}
-
-public struct DeliveryFailureResubmitParams: Codable, Sendable {
-    public let id: String
-    public let queuename: String?
-
-    public init(
-        id: String,
-        queuename: String? = nil)
-    {
-        self.id = id
-        self.queuename = queuename
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case queuename = "queueName"
-    }
-}
-
-public struct DeliveryFailureResubmitSuccessResult: Codable, Sendable {
-    public let ok: Bool
-    public let queuename: String
-    public let disposition: AnyCodable
-
-    public init(
-        ok: Bool,
-        queuename: String,
-        disposition: AnyCodable)
-    {
-        self.ok = ok
-        self.queuename = queuename
-        self.disposition = disposition
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case ok
-        case queuename = "queueName"
-        case disposition
-    }
-}
-
-public struct DeliveryFailureResubmitRefusedResult: Codable, Sendable {
-    public let ok: Bool
-    public let queuename: String?
-    public let reason: DeliveryFailureResubmitReason
-
-    public init(
-        ok: Bool,
-        queuename: String? = nil,
-        reason: DeliveryFailureResubmitReason)
-    {
-        self.ok = ok
-        self.queuename = queuename
-        self.reason = reason
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case ok
-        case queuename = "queueName"
-        case reason
     }
 }
 
@@ -13924,6 +13936,7 @@ public struct CommandEntry: Codable, Sendable {
     public let description: String
     public let category: AnyCodable?
     public let source: AnyCodable
+    public let skilldisplayname: String?
     public let skillmodelvisible: Bool?
     public let scope: AnyCodable
     public let acceptsargs: Bool
@@ -13937,6 +13950,7 @@ public struct CommandEntry: Codable, Sendable {
         description: String,
         category: AnyCodable? = nil,
         source: AnyCodable,
+        skilldisplayname: String? = nil,
         skillmodelvisible: Bool? = nil,
         scope: AnyCodable,
         acceptsargs: Bool,
@@ -13949,6 +13963,7 @@ public struct CommandEntry: Codable, Sendable {
         self.description = description
         self.category = category
         self.source = source
+        self.skilldisplayname = skilldisplayname
         self.skillmodelvisible = skillmodelvisible
         self.scope = scope
         self.acceptsargs = acceptsargs
@@ -13963,6 +13978,7 @@ public struct CommandEntry: Codable, Sendable {
         case description
         case category
         case source
+        case skilldisplayname = "skillDisplayName"
         case skillmodelvisible = "skillModelVisible"
         case scope
         case acceptsargs = "acceptsArgs"
@@ -18378,6 +18394,7 @@ public struct DevicePairSetupCodeParams: Codable, Sendable {
 }
 
 public struct DevicePairSetupCodeResult: Codable, Sendable {
+    public let setupid: String?
     public let setupcode: String
     public let joinurl: String?
     public let qrdataurl: String?
@@ -18390,6 +18407,7 @@ public struct DevicePairSetupCodeResult: Codable, Sendable {
     public let expiresatms: Int?
 
     public init(
+        setupid: String? = nil,
         setupcode: String,
         joinurl: String? = nil,
         qrdataurl: String? = nil,
@@ -18401,6 +18419,7 @@ public struct DevicePairSetupCodeResult: Codable, Sendable {
         accessdowngraded: Bool? = nil,
         expiresatms: Int? = nil)
     {
+        self.setupid = setupid
         self.setupcode = setupcode
         self.joinurl = joinurl
         self.qrdataurl = qrdataurl
@@ -18414,6 +18433,7 @@ public struct DevicePairSetupCodeResult: Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case setupid = "setupId"
         case setupcode = "setupCode"
         case joinurl = "joinUrl"
         case qrdataurl = "qrDataUrl"
@@ -18424,6 +18444,38 @@ public struct DevicePairSetupCodeResult: Codable, Sendable {
         case access
         case accessdowngraded = "accessDowngraded"
         case expiresatms = "expiresAtMs"
+    }
+}
+
+public struct DevicePairSetupStatusParams: Codable, Sendable {
+    public let setupid: String
+
+    public init(
+        setupid: String)
+    {
+        self.setupid = setupid
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case setupid = "setupId"
+    }
+}
+
+public struct DevicePairSetupStatusResult: Codable, Sendable {
+    public let completion: [String: AnyCodable]?
+    public let deliveryuncertain: [String: AnyCodable]?
+
+    public init(
+        completion: [String: AnyCodable]? = nil,
+        deliveryuncertain: [String: AnyCodable]? = nil)
+    {
+        self.completion = completion
+        self.deliveryuncertain = deliveryuncertain
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case completion
+        case deliveryuncertain = "deliveryUncertain"
     }
 }
 
@@ -18719,6 +18771,66 @@ public struct DevicePairResolvedEvent: Codable, Sendable {
         case requestid = "requestId"
         case deviceid = "deviceId"
         case decision
+        case ts
+    }
+}
+
+public struct DevicePairSetupCompletedEvent: Codable, Sendable {
+    public let setupid: String
+    public let deviceid: String
+    public let devicename: String?
+    public let access: AnyCodable
+    public let ts: Int
+
+    public init(
+        setupid: String,
+        deviceid: String,
+        devicename: String? = nil,
+        access: AnyCodable,
+        ts: Int)
+    {
+        self.setupid = setupid
+        self.deviceid = deviceid
+        self.devicename = devicename
+        self.access = access
+        self.ts = ts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case setupid = "setupId"
+        case deviceid = "deviceId"
+        case devicename = "deviceName"
+        case access
+        case ts
+    }
+}
+
+public struct DevicePairSetupDeliveryUncertainEvent: Codable, Sendable {
+    public let setupid: String
+    public let deviceid: String
+    public let devicename: String?
+    public let access: AnyCodable
+    public let ts: Int
+
+    public init(
+        setupid: String,
+        deviceid: String,
+        devicename: String? = nil,
+        access: AnyCodable,
+        ts: Int)
+    {
+        self.setupid = setupid
+        self.deviceid = deviceid
+        self.devicename = devicename
+        self.access = access
+        self.ts = ts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case setupid = "setupId"
+        case deviceid = "deviceId"
+        case devicename = "deviceName"
+        case access
         case ts
     }
 }
@@ -20196,31 +20308,6 @@ public enum AuditRunIdentityV1: Codable, Sendable {
         case .unknown(let value): try value.encode(to: encoder)
         case .unsupported(let value): try value.encode(to: encoder)
         case .ambiguous(let value): try value.encode(to: encoder)
-        }
-    }
-}
-
-public enum DeliveryFailureResubmitResult: Codable, Sendable {
-    case success(DeliveryFailureResubmitSuccessResult)
-    case failure(DeliveryFailureResubmitRefusedResult)
-
-    private enum CodingKeys: String, CodingKey {
-        case discriminator = "ok"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let discriminator = try container.decode(Bool.self, forKey: .discriminator)
-        switch discriminator {
-        case true: self = try .success(DeliveryFailureResubmitSuccessResult(from: decoder))
-        case false: self = try .failure(DeliveryFailureResubmitRefusedResult(from: decoder))
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        switch self {
-        case .success(let value): try value.encode(to: encoder)
-        case .failure(let value): try value.encode(to: encoder)
         }
     }
 }
