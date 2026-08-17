@@ -1,29 +1,28 @@
-// Control UI page module owns Chat transcript loading and selected-session message subscription.
 import {
   readSessionMessageIdentity,
   readSessionMessageSequence,
 } from "@openclaw/gateway-client/browser";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import type { CommandsListResult } from "../../../../packages/gateway-protocol/src/index.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type {
   AgentsListResult,
   GatewaySessionRow,
   GatewaySessionsDefaults,
-  ModelCatalogEntry,
   SessionBranch,
   SessionsListResult,
 } from "../../api/types.ts";
+import type { ChatMetadataResult } from "../../lib/chat/chat-metadata-store.ts";
 import {
   isAssistantHeartbeatAckForDisplay,
   stripHeartbeatTokenForDisplay,
 } from "../../lib/chat/heartbeat-display.ts";
 import { extractText, isEmptyUserTextOnlyMessage } from "../../lib/chat/message-extract.ts";
+// Control UI page module owns Chat transcript loading and selected-session message subscription.
+import { formatUiError } from "../../lib/format-error.ts";
 import {
   formatMissingOperatorReadScopeMessage,
   isMissingOperatorReadScopeError,
 } from "../../lib/gateway-errors.ts";
-import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
 import { isSessionRunActive } from "../../lib/session-run-state.ts";
 import {
   scopedAgentParamsForSession,
@@ -46,7 +45,6 @@ import { replaceChatAttachmentsFromEditor } from "./attachment-payload-store.ts"
 import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
 import {
   isRetryableStartupUnavailable,
-  isUnknownGatewayMethodError,
   resolveStartupRetryDelayMs,
   sleep,
 } from "./chat-history-retry.ts";
@@ -511,8 +509,8 @@ function resolveChatHistorySessionId(result: ChatHistoryResult): string | null {
     : null;
 }
 
-function retainedRawHistoryStart(pagination: ChatHistoryPagination | undefined): number | null {
-  const totalMessages = pagination?.totalMessages;
+function retainedRawHistoryStart(pagination: ChatHistoryPagination): number | null {
+  const totalMessages = pagination.totalMessages;
   if (
     typeof totalMessages !== "number" ||
     !Number.isSafeInteger(totalMessages) ||
@@ -520,7 +518,7 @@ function retainedRawHistoryStart(pagination: ChatHistoryPagination | undefined):
   ) {
     return null;
   }
-  const retainedDepth = pagination?.hasMore ? pagination.nextOffset : totalMessages;
+  const retainedDepth = pagination.hasMore ? pagination.nextOffset : totalMessages;
   const start = totalMessages - retainedDepth + 1;
   return Number.isSafeInteger(start) && start > 0 ? start : null;
 }
@@ -530,7 +528,7 @@ function reconcileLoadedHistoryTail(options: {
   nextPagination: ChatHistoryPagination;
   nextSessionId: string | null;
   previousMessages: unknown[];
-  previousPagination: ChatHistoryPagination | undefined;
+  previousPagination: ChatHistoryPagination;
   previousSessionId: string | null;
 }): { messages: unknown[]; pagination: ChatHistoryPagination } | null {
   if (
@@ -540,7 +538,7 @@ function reconcileLoadedHistoryTail(options: {
   ) {
     return null;
   }
-  const previousTotal = options.previousPagination?.totalMessages;
+  const previousTotal = options.previousPagination.totalMessages;
   const nextTotal = options.nextPagination.totalMessages;
   const previousStart = retainedRawHistoryStart(options.previousPagination);
   const nextStart = retainedRawHistoryStart(options.nextPagination);
@@ -572,10 +570,6 @@ function reconcileLoadedHistoryTail(options: {
   };
 }
 
-export type ChatMetadataResult = CommandsListResult & {
-  models?: ModelCatalogEntry[];
-};
-
 export type ChatEventPayload = {
   runId?: string;
   sessionKey: string;
@@ -591,8 +585,9 @@ export type ChatEventPayload = {
 };
 
 function setChatError(state: ChatState, error: string | null) {
-  state.lastError = error;
-  state.chatError = error;
+  const message = error === null ? null : formatUiError(error);
+  state.lastError = message;
+  state.chatError = message;
 }
 
 function chatScopedEventAgentScopeMatches(
@@ -812,7 +807,7 @@ export async function syncSelectedSessionMessageSubscription(
             }
             state.chatSessionMessageSubscriptionRequestedKey = nextKey;
             state.chatSessionMessageSubscription = subscribeResult.value;
-            state.sessionsError = `${String(unsubscribeResult.reason)}; replacement release failed: ${String(replacementReleaseError)}`;
+            state.sessionsError = `${formatUiError(unsubscribeResult.reason)}; replacement release failed: ${formatUiError(replacementReleaseError)}`;
           } else {
             paneRequests.pendingSubscriptionReleases.add(subscribeResult.value);
           }
@@ -820,7 +815,7 @@ export async function syncSelectedSessionMessageSubscription(
         }
       }
       if (isCurrent()) {
-        state.sessionsError = String(unsubscribeResult.reason);
+        state.sessionsError = formatUiError(unsubscribeResult.reason);
       }
       return;
     }
@@ -854,7 +849,7 @@ export async function syncSelectedSessionMessageSubscription(
     state.chatSessionMessageSubscription = subscribed;
   } catch (err) {
     if (isCurrent()) {
-      state.sessionsError = String(err);
+      state.sessionsError = formatUiError(err);
     }
   }
 }
@@ -928,13 +923,6 @@ async function requestChatHistory(
     } catch (err) {
       if (!shouldContinue()) {
         throw err;
-      }
-      if (method === "chat.startup" && isUnknownGatewayMethodError(err, method)) {
-        return await client.request<ChatHistoryResult>("chat.history", {
-          sessionKey,
-          ...(requestAgentId ? { agentId: requestAgentId } : {}),
-          limit: CHAT_HISTORY_REQUEST_LIMIT,
-        });
       }
       if (shouldRetry() && isRetryableStartupUnavailable(err, method)) {
         await sleep(resolveStartupRetryDelayMs(err));
@@ -1039,7 +1027,7 @@ function replaceCachedChatMessages(state: ChatState, sessionKey: string, agentId
         ? { displayedLeafEntryId: state.chatDisplayedLeafEntryId }
         : {}),
       messages: state.chatMessages,
-      pagination: state.chatHistoryPagination ?? { hasMore: false },
+      pagination: state.chatHistoryPagination,
       sessionId: state.currentSessionId ?? null,
     },
   );
@@ -1201,7 +1189,7 @@ export async function clearChatHistory(
     }
   } catch (err) {
     if (ownsClearChatView(state, originalViewOwner)) {
-      setChatError(state, String(err));
+      setChatError(state, formatUiError(err));
       scheduleChatScroll(state);
     }
     return "failed";
@@ -1273,7 +1261,7 @@ export async function rewindChatHistory(
     state.handleChatDraftChange(editorText);
     return result;
   } catch (error) {
-    setChatError(state, error instanceof Error ? error.message : String(error));
+    setChatError(state, formatUiError(error));
     scheduleChatScroll(state);
     return null;
   }
@@ -1303,7 +1291,7 @@ export async function switchChatHistoryBranch(
     await Promise.all([loadChatHistory(state), loadChatBranches(state)]);
     return visibleSessionMatches(state, sessionKey, agentParams.agentId);
   } catch (error) {
-    setChatError(state, error instanceof Error ? error.message : String(error));
+    setChatError(state, formatUiError(error));
     scheduleChatScroll(state);
     return false;
   }
@@ -1323,12 +1311,6 @@ export async function loadChatBranches(state: ChatState): Promise<void> {
   const client = state.client;
   const sessionKey = state.sessionKey;
   if (!sessions?.listBranches || !client || !state.connected) {
-    return;
-  }
-  if (isGatewayMethodAdvertised(state, "sessions.branches.list") === false) {
-    state.chatBranches = [];
-    state.chatBranchesSessionKey = sessionKey;
-    state.chatBranchesConnectionEpoch = state.connectionEpoch;
     return;
   }
   const requests = getChatHistoryPaneRequests(state);
@@ -1371,9 +1353,7 @@ export async function loadChatHistory(
   const requestAgentId = isUiSelectedGlobalSessionKey(state, sessionKey)
     ? resolveUiSelectedSessionAgentId(state)
     : undefined;
-  const startupAdvertised = isGatewayMethodAdvertised(state, "chat.startup");
-  const method =
-    opts.startup === true && startupAdvertised !== false ? "chat.startup" : "chat.history";
+  const method = opts.startup === true ? "chat.startup" : "chat.history";
   const client = state.client;
   const connectionEpoch = state.connectionEpoch;
   const requestKey = `${connectionEpoch}\u0000${method}\u0000${sessionKey}\u0000${requestAgentId ?? ""}\u0000${CHAT_HISTORY_REQUEST_LIMIT}`;
@@ -1794,7 +1774,7 @@ async function loadChatHistoryUncached(
       state.chatVerboseLevel = null;
       setChatError(state, formatMissingOperatorReadScopeMessage("existing chat history"));
     } else {
-      setChatError(state, String(err));
+      setChatError(state, formatUiError(err));
     }
   } finally {
     if (ownsChatHistoryRequest(state, ownership)) {

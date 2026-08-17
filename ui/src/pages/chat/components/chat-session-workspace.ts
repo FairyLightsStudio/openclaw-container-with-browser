@@ -20,9 +20,10 @@ import {
 } from "../../../app/settings.ts";
 import { icons } from "../../../components/icons.ts";
 import { renderPanelEmptyState } from "../../../components/panel-empty-state.ts";
-import "../../../components/tooltip.ts";
 import { t } from "../../../i18n/index.ts";
+import "../../../components/tooltip.ts";
 import { copyToClipboard } from "../../../lib/clipboard.ts";
+import { formatUiError } from "../../../lib/format-error.ts";
 import { formatByteSize } from "../../../lib/format.ts";
 import { isGatewayMethodAdvertised } from "../../../lib/gateway-methods.ts";
 import {
@@ -89,6 +90,13 @@ type OpenRequest = {
 
 type SessionWorkspaceOpenRequest = OpenRequest;
 
+// Re-renders must preserve the document identity or the mounted diff panel
+// treats its loader as new and requests sessions.diff again.
+const sessionDiffSidebarContentByHost = new WeakMap<
+  SessionWorkspaceHost,
+  { content: SidebarContent; sessionKey: string }
+>();
+
 export type SessionWorkspaceHost = {
   sessionKey: string;
   sessions: SessionCapability;
@@ -104,7 +112,7 @@ export type SessionWorkspaceHost = {
   sessionWorkspaceOpenRequest?: SessionWorkspaceOpenRequest;
   sessionWorkspaceDraftScope?: string;
   requestUpdate?: () => void;
-  handleOpenSidebar: (content: SidebarContent) => void;
+  handleOpenSidebar: (content: SidebarContent | null) => void;
 };
 
 /** Agent owning the pane's current session: explicit key scope first, then the
@@ -355,7 +363,7 @@ function loadWorkspace(
     } catch (error) {
       const current = currentWorkspaceState(state);
       if (current === workspace && current.requestId === requestId) {
-        current.error = String(error);
+        current.error = formatUiError(error);
       }
     } finally {
       const current = currentWorkspaceState(state);
@@ -428,6 +436,7 @@ function openWorkspaceItem<T>(
     if (!state.client || !state.connected) {
       return;
     }
+    state.handleOpenSidebar(null);
     workspace.error = null;
     try {
       const result = await load(request);
@@ -435,7 +444,6 @@ function openWorkspaceItem<T>(
       if (!content) {
         if (isCurrentOpenRequest(state, request)) {
           workspace.error = missingMessage;
-          requestUpdate(state);
         }
         return;
       }
@@ -444,7 +452,7 @@ function openWorkspaceItem<T>(
       }
     } catch (error) {
       if (isCurrentOpenRequest(state, request)) {
-        workspace.error = String(error);
+        workspace.error = formatUiError(error);
       }
     } finally {
       requestUpdate(state);
@@ -550,7 +558,7 @@ function openFile(
                 return {
                   ok: false as const,
                   code: "error" as const,
-                  message: error instanceof Error ? error.message : String(error),
+                  message: formatUiError(error),
                 };
               }
             },
@@ -689,11 +697,7 @@ export function createSessionWorkspaceProps(
   ) {
     loadWorkspace(state, workspace);
   }
-  const canOpenDiff =
-    isGatewayMethodAdvertised(state, "sessions.diff") === true &&
-    Boolean(state.client) &&
-    workspace.list?.sessionKey === state.sessionKey &&
-    workspace.list.gitCheckout !== false;
+  const diffContent = resolveSessionDiffSidebarContent(state);
   return {
     collapsed: options?.expanded === true ? false : workspace.collapsed,
     sessionKey: state.sessionKey,
@@ -733,10 +737,29 @@ export function createSessionWorkspaceProps(
       }, 160);
     },
     onOpenArtifact: (artifactId) => openArtifact(state, workspace, artifactId),
-    onOpenDiff: canOpenDiff
-      ? () => state.handleOpenSidebar(buildSessionDiffSidebarContent(state))
-      : undefined,
+    onOpenDiff: diffContent ? () => state.handleOpenSidebar(diffContent) : undefined,
   };
+}
+
+export function resolveSessionDiffSidebarContent(
+  state: SessionWorkspaceHost,
+): SidebarContent | null {
+  const workspace = getWorkspaceState(state);
+  const canOpenDiff =
+    isGatewayMethodAdvertised(state, "sessions.diff") === true &&
+    Boolean(state.client) &&
+    workspace.list?.sessionKey === state.sessionKey &&
+    workspace.list.gitCheckout !== false;
+  if (!canOpenDiff) {
+    return null;
+  }
+  const cached = sessionDiffSidebarContentByHost.get(state);
+  if (cached?.sessionKey === state.sessionKey) {
+    return cached.content;
+  }
+  const content = buildSessionDiffSidebarContent(state);
+  sessionDiffSidebarContentByHost.set(state, { content, sessionKey: state.sessionKey });
+  return content;
 }
 
 /** Sidebar payload whose loader refetches sessions.diff for the pane's session. */

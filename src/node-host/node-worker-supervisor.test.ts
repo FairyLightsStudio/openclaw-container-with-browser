@@ -397,7 +397,7 @@ describe("node worker supervisor", () => {
           LC_TIME: suppliedEnv.LC_TIME,
           NODE_EXTRA_CA_CERTS: suppliedEnv.NODE_EXTRA_CA_CERTS,
           NODE_USE_SYSTEM_CA: suppliedEnv.NODE_USE_SYSTEM_CA,
-          NODE_DISABLE_COMPILE_CACHE: "1",
+          NODE_COMPILE_CACHE: expect.stringContaining("node-worker-compile-cache"),
           OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: suppliedEnv.OPENCLAW_ALLOW_INSECURE_PRIVATE_WS,
           OPENCLAW_NO_RESPAWN: "1",
           [suppliedPathKey]: suppliedEnv[suppliedPathKey],
@@ -665,7 +665,7 @@ describe("node worker supervisor", () => {
     const running = await supervisor.launch(input, TEST_WORKER_ENDPOINT);
     expect(running.state).toBe("running");
     const grandchildPath = path.join(workspaceDir, "grandchild.pid");
-    await vi.waitFor(() => expect(fs.existsSync(grandchildPath)).toBe(true));
+    await vi.waitFor(() => expect(fs.readFileSync(grandchildPath, "utf8")).toMatch(/^[1-9]\d*$/u));
     const grandchildPid = Number(fs.readFileSync(grandchildPath, "utf8"));
     const grandchild = requireNodeWorkerProcessIdentity(grandchildPid);
     expect(inspectNodeWorkerProcessIdentity(grandchild)).toBe("live");

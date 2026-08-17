@@ -49,20 +49,6 @@ Onboarding usually configures a gateway token for shared-secret auth. If the Gat
 
 After gateway auth succeeds, connecting from a new browser or device usually requires a **one-time pairing approval**, shown as `disconnected (1008): pairing required`. On the Gateway host, `openclaw dashboard` is the preferred owner path: it opens a short-lived, single-use pairing link and leaves that exact signed browser with a durable administrator credential. Opening a fresh link in the same browser also repairs a previously limited credential; another browser profile cannot inherit or replay the grant.
 
-<Warning>
-When upgrading directly from a release that used the retired
-`gateway.controlUi.dangerouslyDisableDeviceAuth=true` break-glass setting,
-OpenClaw keeps token/password- or trusted-proxy-authenticated Control UI access
-available for pairing-only remediation. If the browser is on plain HTTP and cannot create device identity,
-reopen it over HTTPS or localhost first. Then click **Secure this browser** in
-the warning banner. The Gateway returns to normal device-auth enforcement only
-after a signed browser pairs explicitly; it never creates or approves an
-identity for a device-less browser. The transition is not available when
-another operator device is already paired. Gateway startup and
-`openclaw doctor --fix` both report this migration explicitly instead of
-silently discarding the old key.
-</Warning>
-
 <Steps>
   <Step title="List pending requests">
     ```bash
@@ -242,7 +228,7 @@ The sidebar organizes everything around the agent. The identity row at the top i
 
 ### Session icons
 
-Choose **Set icon** from a single session's context menu to give its sidebar row one persistent emoji. The `sessions` agent tool can set the same `icon` field; only one emoji grapheme is accepted, and an empty value removes it. This decoration replaces the owner avatar in the leading glyph slot, but temporary attention state always takes precedence so an operator request cannot be hidden.
+Choose **Set icon** from a single session's context menu to give its sidebar row one persistent emoji or monochrome icon. The picker includes common emoji and six named icons: `braces`, `book`, `monitor`, `bot`, `kanban`, and `coins`. Choose **Custom emoji…** to enter any single emoji; on macOS, press Control-Command-Space to open the system emoji picker, or press Windows-period on Windows. The `sessions` agent tool can set the same `icon` field. An empty value removes it. This decoration replaces the owner avatar in the leading glyph slot, but temporary attention state always takes precedence so an operator request cannot be hidden.
 
 ## New session page
 
@@ -428,7 +414,7 @@ Use **Ctrl + backtick** to toggle the **Terminal** tab in the selected Chat pane
 
 The unified panel also hosts **Browser**, **Files**, **Tasks**, **Review**, **Side chat**, and capability-dependent **Desktop** and **Discussion** tabs. Its open or minimized state, active tab, tab order, width, dock, and expanded state are stored per session in the current browser profile, so switching sessions restores each session's own working layout. Drag tabs to reorder them, close a tab without closing the other tools, or use the panel close button to minimize the whole panel.
 
-Owner-authorized, unsandboxed agents can use the `terminal` tool for long or interactive work that the operator should watch. Each tool call can open, read, write, resize, close, or list the agent's own gateway PTYs. New sessions open a co-attached Control UI tab by default, so the agent and operator share output and either can type or resize. Agent access is exact-session scoped: an agent cannot read or control operator-created terminals or terminals opened by another agent session.
+Owner-authorized, unsandboxed agents can use the `terminal` tool for long or interactive work. Each tool call can open, read, write, resize, close, or list the agent's own gateway PTYs. These PTYs stay in the background by default; opening one does not open the Terminal panel or attach a browser tab. To watch one, open **Terminal**, select the server icon for **Terminal sessions**, and choose its agent-marked session. The agent and attached operator then share output, and either can type or resize. Agent access is exact-session scoped: an agent cannot read or control operator-created terminals or terminals opened by another agent session.
 
 Drag one or more files onto the active terminal, or use the paperclip button to choose files. OpenClaw stages each file on the machine that owns the PTY and pastes shell-quoted absolute paths at the cursor; it never presses Enter or executes the input. A compact batch indicator shows the current file and completed count. Cancel stops the remaining batch without pasting paths; a failed transfer stays visible so you can retry from that file without re-uploading completed files. Images, PDFs, archives, and other file types are accepted up to 16 MiB per file. Staged files use a private system-temporary directory on POSIX hosts (directory mode `0700`, file mode `0600`) or a directory under the user-profile ACL boundary on Windows, plus a 24-hour cleanup timer, so move or copy anything you need to keep.
 
@@ -665,7 +651,7 @@ openclaw gateway --tailscale serve
 
 Open `https://<magicdns>/` (or your configured `gateway.controlUi.basePath`).
 
-By default, Control UI/WebSocket Serve requests can authenticate via Tailscale identity headers (`tailscale-user-login`) when `gateway.auth.allowTailscale` is `true`. OpenClaw verifies the identity by resolving the `x-forwarded-for` address with `tailscale whois` and matching it to the header, and only accepts these when the request hits loopback with Tailscale's `x-forwarded-*` headers. For Control UI operator sessions with browser device identity, this verified Serve path also skips the device-pairing round trip; device-less browsers and node-role connections still follow the normal device checks. Set `gateway.auth.allowTailscale: false` if you want to require explicit shared-secret credentials even for Serve traffic, then use `gateway.auth.mode: "token"` or `"password"`.
+By default, Control UI/WebSocket Serve requests can authenticate via Tailscale identity headers (`tailscale-user-login`) when `gateway.auth.allowTailscale` is `true`. OpenClaw verifies the identity by resolving the `x-forwarded-for` address with `tailscale whois` and matching it to the header, and only accepts these on its dedicated managed-Tailscale listener with Tailscale's `x-forwarded-*` headers. For Control UI operator sessions with browser device identity, this verified Serve path also skips the device-pairing round trip; device-less browsers and node-role connections still follow the normal device checks. Set `gateway.auth.allowTailscale: false` if you want to require explicit shared-secret credentials even for Serve traffic, then use `gateway.auth.mode: "token"` or `"password"`.
 
 For that async Serve identity path, failed auth attempts for the same client IP and auth scope are serialized before rate-limit writes. Concurrent bad retries from the same browser can therefore show `retry later` on the second request instead of two plain mismatches racing in parallel.
 
@@ -675,13 +661,15 @@ Tokenless Serve auth assumes the gateway host is trusted. If untrusted local cod
 
 ## Insecure HTTP
 
-If you open the dashboard over plain HTTP (`http://<lan-ip>` or `http://<tailscale-ip>`), the browser runs in a **non-secure context** and blocks WebCrypto. OpenClaw rejects token/password Control UI connections without device identity; a shared secret cannot replace browser identity.
+Opening the dashboard over plain HTTP (`http://<lan-ip>` or `http://<tailscale-ip>`) works: device identity is generated and signed with pure-JS Ed25519, so pairing does not depend on WebCrypto or a secure context. The signing key never leaves the browser, which makes it the one credential a plaintext transport cannot leak — unlike the shared token, which any on-path observer of an HTTP connection can read.
+
+Plain HTTP remains a downgraded transport: an active attacker on the path can modify the page and capture anything in it. Prefer HTTPS wherever possible — Tailscale Serve gives you a real certificate with no configuration — and treat HTTP as a LAN-only convenience. Browsers also withhold secure-context features (for example passkeys) on HTTP, and Chrome's Local Network Access rules increasingly restrict plaintext local requests.
 
 The supported device-less exception is successful operator Control UI auth
 through `gateway.auth.mode: "trusted-proxy"`. There is no persistent config
 switch that disables device identity.
 
-**Recommended fix:** use HTTPS (Tailscale Serve) or open the UI locally at `https://<magicdns>/` (Serve) or `http://127.0.0.1:18789/` (on the gateway host).
+**Recommended setup:** HTTPS via `https://<magicdns>/` (Tailscale Serve) or the UI locally at `http://127.0.0.1:18789/` (on the gateway host).
 
 <AccordionGroup>
   <Accordion title="Trusted-proxy note">
@@ -766,7 +754,7 @@ Then point the UI at your Gateway WS URL (e.g. `ws://127.0.0.1:18789`).
 
 ## Blank Control UI page
 
-If the browser loads a blank dashboard and DevTools shows no useful error, an extension or early content script may have prevented the JavaScript module app from evaluating. The static page includes a plain HTML recovery panel that appears when `<openclaw-app>` is not registered after startup.
+If the browser loads a blank dashboard and DevTools shows no useful error, an extension or early content script may have prevented the JavaScript module app from evaluating. The static page includes a plain HTML recovery panel that appears when `<openclaw-app>` does not complete its first render after startup.
 
 Use the panel's **Try again** action after changing the browser environment, or reload manually after these checks:
 

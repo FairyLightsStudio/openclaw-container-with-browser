@@ -21,6 +21,7 @@ import {
   TERMINAL_PANEL_TOGGLE_EVENT,
 } from "../../components/panel-toggle-contract.ts";
 import { t } from "../../i18n/index.ts";
+import { formatUiError } from "../../lib/format-error.ts";
 import { resolveAsciiShortcutKey } from "../../lib/keyboard-shortcuts.ts";
 import { sessionPullRequestsForGateway } from "../../lib/session-pull-requests.ts";
 import { parseCatalogSessionKey } from "../../lib/sessions/catalog-key.ts";
@@ -53,7 +54,7 @@ import { setChatError } from "./chat-send-queue-state.ts";
 import { applySelectedChatAgent } from "./chat-session.ts";
 import { handlePageGatewayEvent } from "./chat-state-events.ts";
 import { createPageState } from "./chat-state-page.ts";
-import { invalidateChatMetadataCache, refreshPageChat } from "./chat-state-refresh.ts";
+import { refreshPageChat, retireChatMetadataRequests } from "./chat-state-refresh.ts";
 import { resetChatViewState } from "./chat-view-state.ts";
 import { dismissConfirmedActionPopovers } from "./components/chat-message.ts";
 import { clearChatModelSearchOnEscape } from "./components/chat-model-picker.ts";
@@ -275,7 +276,7 @@ export abstract class ChatPaneLifecycle extends ChatPaneSessionCreation {
         },
       })
       .catch((error: unknown) => {
-        setChatError(state, error instanceof Error ? error.message : String(error));
+        setChatError(state, formatUiError(error));
         state.requestUpdate?.();
       });
   }
@@ -545,7 +546,7 @@ export abstract class ChatPaneLifecycle extends ChatPaneSessionCreation {
             invalidateChatAvatarCache(state);
             invalidateAssistantIdentityCache(state.client);
             state.assistantIdentityRequestVersion += 1;
-            invalidateChatMetadataCache(state);
+            retireChatMetadataRequests(state);
             void refreshChatAvatar(state).finally(() => state.requestUpdate?.());
           }
           handleQuestionPromptEvent(this.questionPromptState, event);
