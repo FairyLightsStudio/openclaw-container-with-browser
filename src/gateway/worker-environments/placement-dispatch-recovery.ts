@@ -1,5 +1,4 @@
 import { supportsWorkerExecutionContextLaunch } from "./admission.js";
-import { DEVICE_WORKER_PROVIDER_ID } from "./device-provider.js";
 import {
   isCurrentActiveWorkerEnvironment,
   isUnavailableEnvironment,
@@ -48,13 +47,26 @@ function blockingWorkspaceJournalSessions(
   placements: PlacementRecoveryDeps["placements"],
 ): Set<string> {
   const sessions = new Set<string>();
+  const pendingBySession = new Map(
+    placements
+      .listPendingWorkspaceResults()
+      .map((pending) => [pending.sessionId, pending] as const),
+  );
   for (const owner of placements.listWorkspaceReconciliationOwners()) {
     const placement = placements.get(owner.sessionId);
+    const pending = pendingBySession.get(owner.sessionId);
+    const ownsCurrentGeneration = placement?.generation === owner.placementGeneration;
+    const ownsDrainedPendingGeneration =
+      placement?.state === "draining" &&
+      placement.generation === owner.placementGeneration + 1 &&
+      pending?.environmentId === owner.environmentId &&
+      pending.ownerEpoch === owner.ownerEpoch &&
+      pending.placementGeneration === owner.placementGeneration;
     if (
       (placement?.state === "active" || placement?.state === "draining") &&
       placement.environmentId === owner.environmentId &&
       placement.activeOwnerEpoch === owner.ownerEpoch &&
-      placement.generation === owner.placementGeneration
+      (ownsCurrentGeneration || ownsDrainedPendingGeneration)
     ) {
       sessions.add(owner.sessionId);
     }
@@ -99,7 +111,7 @@ export function createPlacementRecoveryActions(deps: PlacementRecoveryDeps) {
       // Paired nodes are persistent runners, not one-shot SSH children. Their
       // dormant lease remains authoritative while offline; validate and create
       // the reconnect-scoped tunnel lazily when the next turn actually launches.
-      if (environment.providerId !== DEVICE_WORKER_PROVIDER_ID) {
+      if (!environment.nodeDeviceId) {
         await environments.startTunnel({
           environmentId: environment.environmentId,
           ownerEpoch: environment.ownerEpoch,
@@ -192,8 +204,13 @@ export function createPlacementRecoveryActions(deps: PlacementRecoveryDeps) {
     await environments.reconcileOnce();
     const pendingResultOwners = await recoverPendingWorkspaceResults(deps, true);
     const journalOwners = blockingWorkspaceJournalSessions(placements);
+    const moveOwners = (await deps.recoverPlacementMoves?.()) ?? new Set<string>();
     for (const placement of placements.listForReconcile()) {
-      if (journalOwners.has(placement.sessionId) || pendingResultOwners.has(placement.sessionId)) {
+      if (
+        journalOwners.has(placement.sessionId) ||
+        pendingResultOwners.has(placement.sessionId) ||
+        moveOwners.has(placement.sessionId)
+      ) {
         continue;
       }
       if (placement.state === "local" || placement.state === "reclaimed") {
@@ -231,8 +248,13 @@ export function createPlacementRecoveryActions(deps: PlacementRecoveryDeps) {
     await environments.reconcileOnce();
     const pendingResultOwners = await recoverPendingWorkspaceResults(deps, false, environmentId);
     const journalOwners = blockingWorkspaceJournalSessions(placements);
+    const moveOwners = (await deps.recoverPlacementMoves?.()) ?? new Set<string>();
     for (const placement of placements.listForReconcile()) {
-      if (journalOwners.has(placement.sessionId) || pendingResultOwners.has(placement.sessionId)) {
+      if (
+        journalOwners.has(placement.sessionId) ||
+        pendingResultOwners.has(placement.sessionId) ||
+        moveOwners.has(placement.sessionId)
+      ) {
         continue;
       }
       if (environmentId !== undefined && placement.environmentId !== environmentId) {

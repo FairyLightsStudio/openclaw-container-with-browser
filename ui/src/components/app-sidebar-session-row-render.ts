@@ -18,7 +18,6 @@ import type {
   CatalogBackingSessionDisplay,
   CatalogSessionMenuRequest,
 } from "./app-sidebar-session-catalogs.ts";
-import { formatSidebarTimestamp } from "./app-sidebar-session-catalogs.ts";
 import {
   rowDemandsVisibility,
   sidebarSessionMetaId,
@@ -175,11 +174,16 @@ export function renderRecentSession(params: {
   const pullRequestState = session.worktreeId
     ? host.sessionPullRequestIndicatorState(session.key, session.worktreeId)
     : "none";
-  const ownerAttribution = host.sessionsStatusFilter === "archived" ? "archived" : "created";
+  const ownerAttribution =
+    host.sessionsStatusFilter === "archived"
+      ? "archived"
+      : session.owner?.assignedAt !== undefined
+        ? "owned"
+        : "created";
   const ownerActor = host.sessionOwnershipVisible
     ? host.sessionsStatusFilter === "archived"
       ? session.archivedBy
-      : session.createdActor
+      : session.owner?.actor
     : undefined;
   const ownerId = ownerActor?.id?.trim();
   const ownerViewing = ownerId
@@ -196,29 +200,21 @@ export function renderRecentSession(params: {
       ownerActor,
       ownerAttribution,
       ownerViewing,
+      session.participants,
+      session.participantCount,
     );
   const trailingDescription = session.isChild
     ? ""
     : describeSessionTrailingState(session, pullRequestState);
-  const meta = display?.meta ?? formatSidebarTimestamp(session.updatedAt);
-  const rowMeta = session.pinned ? "" : meta;
   const hasTrail = session.isChild && (session.runtimeMs != null || session.startedAt != null);
   const metaId = hasTrail ? sidebarSessionMetaId(session.key) : undefined;
   const stateId = trailingIndicator === nothing ? undefined : sidebarSessionStateId(session.key);
-  const openMenuFromEvent = session.isChild
-    ? undefined
-    : (event: MouseEvent | KeyboardEvent) =>
-        handleContextMenuEvent(
-          event,
-          (event.currentTarget as HTMLElement).querySelector("[data-session-menu]"),
-          (trigger, x, y) => host.sidebarMenus.openSessionMenu(session, x, y, trigger),
-        );
-  const title = [
-    display?.title ?? [label, narration, rowMeta].filter(Boolean).join(" · "),
-    trailingDescription,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const openMenuFromEvent = (event: MouseEvent | KeyboardEvent) =>
+    handleContextMenuEvent(
+      event,
+      (event.currentTarget as HTMLElement).querySelector("[data-session-menu]"),
+      (trigger, x, y) => host.sidebarMenus.openSessionMenu(session, x, y, trigger),
+    );
   const pinLabel = `${t(session.pinned ? "sessionsView.unpinSession" : "sessionsView.pinSession")}: ${label}`;
   const menuLabel = `${t("chat.sidebar.openSessionMenu")}: ${label}`;
   const rowClass = [
@@ -260,7 +256,6 @@ export function renderRecentSession(params: {
       data-session-key=${session.key}
       role=${ifDefined(listItem ? "listitem" : undefined)}
       draggable=${rowDraggable ? "true" : "false"}
-      title=${!session.isChild && !groupWriteAccess.allowed ? groupWriteAccess.reason : nothing}
       @dragstart=${!rowDraggable
         ? nothing
         : (event: DragEvent) => {
@@ -274,8 +269,8 @@ export function renderRecentSession(params: {
         : () => {
             host.finishSessionDrag();
           }}
-      @contextmenu=${openMenuFromEvent ?? nothing}
-      @keydown=${openMenuFromEvent ?? nothing}
+      @contextmenu=${openMenuFromEvent}
+      @keydown=${openMenuFromEvent}
       @mouseenter=${(event: MouseEvent) => startHoverMarquee(event.currentTarget as HTMLElement)}
       @mouseleave=${(event: MouseEvent) => stopHoverMarquee(event.currentTarget as HTMLElement)}
     >
@@ -283,7 +278,6 @@ export function renderRecentSession(params: {
         href=${session.href}
         class="sidebar-recent-session__link"
         draggable="false"
-        title=${title}
         aria-current=${session.visuallyActive ? "page" : nothing}
         aria-describedby=${[stateId, metaId].filter(Boolean).join(" ") || nothing}
         @click=${(event: MouseEvent) => host.handleSessionRowClick(event, session)}
@@ -401,11 +395,11 @@ export function renderRecentSession(params: {
                 >`}
           </button>`
         : nothing}
-      ${session.isChild
-        ? nothing
-        : html`<span class="sidebar-recent-session__aside session-row-aside">
-            <span class="session-row-actions">
-              <button
+      <span class="sidebar-recent-session__aside session-row-aside">
+        <span class="session-row-actions">
+          ${session.isChild
+            ? nothing
+            : html`<button
                 class="session-action session-action--pin"
                 data-sidebar-session-pin="true"
                 type="button"
@@ -415,25 +409,25 @@ export function renderRecentSession(params: {
                 @click=${() => host.toggleSessionPin(session)}
               >
                 ${icons.pin}
-              </button>
-              <button
-                class="session-action"
-                data-session-menu="true"
-                type="button"
-                title=${menuLabel}
-                aria-label=${menuLabel}
-                aria-haspopup="menu"
-                aria-expanded=${String(host.sidebarMenus.sessionMenu?.session.key === session.key)}
-                @click=${(event: MouseEvent) => {
-                  event.stopPropagation();
-                  const trigger = event.currentTarget as HTMLElement;
-                  host.toggleSessionMenu(session, trigger);
-                }}
-              >
-                ${icons.moreHorizontal}
-              </button>
-            </span>
-          </span>`}
+              </button>`}
+          <button
+            class="session-action"
+            data-session-menu="true"
+            type="button"
+            title=${menuLabel}
+            aria-label=${menuLabel}
+            aria-haspopup="menu"
+            aria-expanded=${String(host.sidebarMenus.sessionMenu?.session.key === session.key)}
+            @click=${(event: MouseEvent) => {
+              event.stopPropagation();
+              const trigger = event.currentTarget as HTMLElement;
+              host.toggleSessionMenu(session, trigger);
+            }}
+          >
+            ${icons.moreHorizontal}
+          </button>
+        </span>
+      </span>
     </div>
   `;
   // Marquee state mutates the row DOM; keying prevents cross-session reuse.

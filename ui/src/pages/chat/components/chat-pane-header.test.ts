@@ -126,6 +126,7 @@ function mountIntegratedPresenceHeader(params: {
   const session = row({
     key: state.sessionKey,
     createdActor: { type: "human", id: "profile-ada", label: "Ada" },
+    owner: { actor: { type: "human", id: "profile-ada", label: "Ada" } },
   });
   state.settings = {} as ChatPageHost["settings"];
   state.sessionsResult = {
@@ -348,7 +349,8 @@ describe("chat pane header", () => {
     expect(props.onBeginRename).toHaveBeenCalledOnce();
   });
 
-  it("renders a quiet cloud placement chip with the canonical stop action", () => {
+  it("renders a quiet cloud placement chip with move and stop actions", () => {
+    const onPlacementMove = vi.fn();
     const onPlacementReclaim = vi.fn();
     const { container } = mount({
       session: row({
@@ -365,6 +367,7 @@ describe("chat pane header", () => {
           remoteWorkspaceDir: "/worker/repo",
         },
       }),
+      onPlacementMove,
       onPlacementReclaim,
     });
 
@@ -374,13 +377,43 @@ describe("chat pane header", () => {
     expect(container.querySelector(".chat-pane__placement-state")).toBeNull();
     expect(container.querySelector(".chat-pane__placement-note")).toBeNull();
     const actions = container.querySelectorAll(".chat-pane__placement-menu wa-dropdown-item");
-    expect(actions).toHaveLength(1);
-    expect(actions[0]?.textContent?.trim()).toBe("Stop cloud worker…");
-    expect(actions[0]?.classList.contains("session-menu__item--destructive")).toBe(true);
-    expect(actions[0]?.getAttribute("variant")).toBe("danger");
-    expect(actions[0]?.querySelector(".session-menu__icon")).not.toBeNull();
+    expect(actions).toHaveLength(2);
+    expect(actions[0]?.textContent?.trim()).toBe("Move session…");
+    expect(actions[0]?.classList.contains("session-menu__item--destructive")).toBe(false);
     actions[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onPlacementMove).toHaveBeenCalledOnce();
+    expect(actions[1]?.textContent?.trim()).toBe("Stop cloud worker…");
+    expect(actions[1]?.classList.contains("session-menu__item--destructive")).toBe(true);
+    expect(actions[1]?.getAttribute("variant")).toBe("danger");
+    expect(actions[1]?.querySelector(".session-menu__icon")).not.toBeNull();
+    actions[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onPlacementReclaim).toHaveBeenCalledOnce();
+  });
+
+  it("shows durable move progress in the placement chip", () => {
+    const session = row({
+      placement: {
+        state: "draining",
+        generation: 2,
+        createdAtMs: 100_000,
+        updatedAtMs: 300_000,
+        stateChangedAtMs: 300_000,
+        environmentId: "worker:one",
+        activeOwnerEpoch: 1,
+        workerBundleHash: "a".repeat(64),
+        workspaceBaseManifestRef: "base-manifest",
+        remoteWorkspaceDir: "/worker/repo",
+      },
+      placementMove: {
+        target: { kind: "gateway" },
+        updatedAtMs: 300_000,
+      },
+    });
+    const { container } = mount({ session });
+
+    expect(container.querySelector(".chat-pane__placement-chip")?.textContent?.trim()).toBe(
+      "Moving to Gateway…",
+    );
   });
 
   it.each(["local", "reclaimed"] as const)("hides the placement chip for %s state", (state) => {
@@ -461,7 +494,10 @@ describe("chat pane header", () => {
   it("renders the permanent owner chip only when attribution chrome is enabled", () => {
     const shown = mount({
       showOwnerChip: true,
-      session: row({ createdActor: { type: "human", id: "profile-ada", label: "Ada" } }),
+      session: row({
+        createdActor: { type: "human", id: "profile-ada", label: "Ada" },
+        owner: { actor: { type: "human", id: "profile-ada", label: "Ada" } },
+      }),
     });
     expect(shown.container.querySelector("openclaw-session-owner-chip")).not.toBeNull();
 
@@ -472,12 +508,38 @@ describe("chat pane header", () => {
     expect(dormant.container.querySelector("openclaw-session-owner-chip")).toBeNull();
   });
 
+  it("renders the bounded static participant facepile beside the owner", async () => {
+    const mounted = mount({
+      showOwnerChip: true,
+      session: row({
+        createdActor: { type: "human", id: "profile-ada", label: "Ada" },
+        owner: { actor: { type: "human", id: "profile-ada", label: "Ada" } },
+        participants: [
+          { type: "human", id: "profile-bob", label: "Bob" },
+          { type: "agent", id: "research", label: "Research" },
+        ],
+        participantCount: 2,
+      }),
+    });
+    const facepile = mounted.container.querySelector<
+      HTMLElement & { updateComplete?: Promise<unknown> }
+    >("openclaw-viewer-facepile.chat-pane__participants");
+    await facepile?.updateComplete;
+
+    expect(mounted.container.querySelector("openclaw-session-owner-chip")).not.toBeNull();
+    expect(
+      [...(facepile?.querySelectorAll("[data-viewer-id]") ?? [])].map((avatar) =>
+        avatar.getAttribute("data-viewer-id"),
+      ),
+    ).toEqual(["profile-bob", "research"]);
+  });
+
   it.each([
     {
       name: "excludes the creator when the owner chip is shown",
       creators: [
-        { type: "human", id: "profile-ada", label: "Ada" },
-        { type: "human", id: "profile-zoe", label: "Zoe" },
+        { type: "human" as const, id: "profile-ada", label: "Ada" },
+        { type: "human" as const, id: "profile-zoe", label: "Zoe" },
       ],
       viewers: ["profile-ada", "profile-zoe"],
       expectedChip: true,
@@ -485,7 +547,7 @@ describe("chat pane header", () => {
     },
     {
       name: "keeps the creator when the owner chip is hidden",
-      creators: [{ type: "human", id: "profile-ada", label: "Ada" }],
+      creators: [{ type: "human" as const, id: "profile-ada", label: "Ada" }],
       viewers: ["profile-ada", "profile-zoe"],
       expectedChip: false,
       expectedViewers: ["profile-ada", "profile-zoe"],
@@ -493,8 +555,8 @@ describe("chat pane header", () => {
     {
       name: "omits the facepile when the shown owner is the only viewer",
       creators: [
-        { type: "human", id: "profile-ada", label: "Ada" },
-        { type: "human", id: "profile-zoe", label: "Zoe" },
+        { type: "human" as const, id: "profile-ada", label: "Ada" },
+        { type: "human" as const, id: "profile-zoe", label: "Zoe" },
       ],
       viewers: ["profile-ada"],
       expectedChip: true,
@@ -576,6 +638,14 @@ describe("chat pane header", () => {
           id: "profile-ada",
           label: "Ada",
           avatarUrl: "/api/users/profile-ada/avatar?v=7",
+        },
+        owner: {
+          actor: {
+            type: "human",
+            id: "profile-ada",
+            label: "Ada",
+            avatarUrl: "/api/users/profile-ada/avatar?v=7",
+          },
         },
       }),
     });

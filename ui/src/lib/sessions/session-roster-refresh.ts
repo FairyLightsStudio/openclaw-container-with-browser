@@ -79,6 +79,8 @@ function isPrimarySessionListQuery(options: SessionListScope): boolean {
     !query.activeMinutes &&
     !query.search &&
     !query.creatorId &&
+    !query.ownerId &&
+    query.involvingMe !== true &&
     query.includeGlobal === true &&
     query.includeUnknown === true &&
     query.configuredAgentsOnly === true
@@ -533,7 +535,22 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       }
     },
     setCreatorFilter(creatorId: string | null) {
-      const options = { ...lastListOptions, creatorId: creatorId?.trim() || undefined };
+      const options = {
+        ...lastListOptions,
+        creatorId: undefined,
+        ownerId: creatorId?.trim() || undefined,
+        involvingMe: undefined,
+      };
+      delete options.offset;
+      return refresh({ ...options, force: true });
+    },
+    setInvolvingMeFilter(enabled: boolean) {
+      const options = {
+        ...lastListOptions,
+        creatorId: undefined,
+        ownerId: undefined,
+        involvingMe: enabled || undefined,
+      };
       delete options.offset;
       return refresh({ ...options, force: true });
     },
