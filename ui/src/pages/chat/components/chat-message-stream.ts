@@ -11,7 +11,11 @@ import { renderGroupedMessage } from "./chat-message-bubble.ts";
 import { renderChatTimestamp } from "./chat-message-timestamp.ts";
 import { renderChatQuestionSummary } from "./chat-question-card.ts";
 import type { SidebarContent } from "./chat-sidebar.ts";
-import { shouldToggleSelectableDisclosure, syncToolDisclosureOverflow } from "./chat-tool-cards.ts";
+import {
+  shouldToggleSelectableDisclosure,
+  syncToolDisclosureOverflow,
+  toggleToolDisclosureKeepingScroll,
+} from "./chat-tool-cards.ts";
 import { renderChatWorkingIndicator } from "./chat-working-indicator.ts";
 
 /** A contiguous run of in-flight streaming items rendered under one assistant group. */
@@ -37,6 +41,7 @@ type StreamMessageOptions = Pick<
   | "onOpenImage"
   | "embedSandboxMode"
   | "allowExternalEmbedUrls"
+  | "fetchLinkFavicon"
   | "onOpenWorkspaceFile"
 >;
 
@@ -98,6 +103,7 @@ export function renderStreamGroupParts(
               onOpenImage: opts.onOpenImage,
               embedSandboxMode: opts.embedSandboxMode,
               allowExternalEmbedUrls: opts.allowExternalEmbedUrls,
+              fetchLinkFavicon: opts.fetchLinkFavicon,
               onOpenWorkspaceFile: opts.onOpenWorkspaceFile,
             },
             opts.onOpenSidebar,
@@ -166,7 +172,7 @@ export function renderWorkGroupSummary(
             @focus=${syncToolDisclosureOverflow}
             @click=${(event: MouseEvent) => {
               if (shouldToggleSelectableDisclosure(event)) {
-                opts.onToggle();
+                toggleToolDisclosureKeepingScroll(event, opts.onToggle);
               }
             }}
           >
