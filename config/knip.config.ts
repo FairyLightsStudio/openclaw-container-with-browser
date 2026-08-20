@@ -574,6 +574,7 @@ const config = {
         "src/index.ts!",
         "src/agent-id.ts!",
         "src/boolean-coercion.ts!",
+        "src/browser-error-runtime.ts!",
         "src/error-coercion.ts!",
         "src/expect.ts!",
         "src/json-coercion.ts!",
@@ -676,6 +677,8 @@ const config = {
       // Copied as executable runtime internals by the package artifact manifest.
       "src/runtime-internals/mcp-command-line.mjs!",
       "src/runtime-internals/mcp-proxy.mjs!",
+      // Spawned by the real-process elicitation regression through CODEX_PATH.
+      "test/fixtures/codex-app-server.mjs!",
     ]),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/azure-speech`]: bundledPluginWorkspace(),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/browser`]: bundledPluginWorkspace([

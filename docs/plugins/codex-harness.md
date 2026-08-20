@@ -57,18 +57,19 @@ existing per-session OpenClaw process scope for background follow-up. Prefer
 Codex native shell for ordinary local work.
 
 With the default `tools.exec.host: "auto"` and no active OpenClaw sandbox,
-Codex also receives `node_exec` and `node_process` tools for commands on paired
-nodes. Native shell remains on the Codex app-server host and workspace
+Codex also receives `node_exec` for commands on paired nodes. Native shell
+remains on the Codex app-server host and workspace
 (Gateway-local for the default stdio deployment); `node_exec` selects a node by
-name or id and keeps OpenClaw's node approval policy in force. If a finite
-runtime allowlist disables native Code Mode and leaves the turn without an
-execution environment, OpenClaw keeps its policy-filtered `exec` and `process`
-tools available instead for direct, unsandboxed execution.
+name or id, keeps OpenClaw's node approval policy in force, and waits for the
+remote command to finish. Remote-node background follow-up is not available. If
+a finite runtime allowlist disables native Code Mode and leaves the turn without
+an execution environment, OpenClaw keeps its policy-filtered `exec` and
+`process` tools available instead for direct, unsandboxed execution.
 
 When `tools.exec.host: "node"` or `/exec host=node` makes the node the session
-default, OpenClaw hides the Codex-native shell and exposes `node_exec` and
-`node_process` as the shell path. This keeps the configured execution host from
-silently falling back to the app-server or Gateway machine.
+default, OpenClaw hides the Codex-native shell and exposes `node_exec` as the
+shell path. This keeps the configured execution host from silently falling
+back to the app-server or Gateway machine.
 
 `gateway_exec` is not exposed when an active OpenClaw sandbox, a node-default
 execution policy, memory-flush restrictions, tool allow/deny policy, or
@@ -88,10 +89,12 @@ channel is the communication surface.
 
 - The official `@openclaw/codex` plugin installed. Include `codex` in
   `plugins.allow` if your config uses an allowlist.
-- Codex app-server `0.147.0`. The plugin ships and manages `@openai/codex`
-  `0.147.0` by default, so a `codex` command on `PATH` does not affect normal
-  startup. Explicit custom, remote, and macOS desktop-owned app-servers must
-  report the same exact stable `0.147.0` version.
+- Codex app-server `0.147.0` or newer. The plugin still ships and manages the
+  exact `@openai/codex` `0.147.0` artifact, so a `codex` command on `PATH` does
+  not affect normal startup. Explicit custom, remote, and macOS desktop-owned
+  app-servers must report valid SemVer at or above that managed baseline.
+  Newer versions initialize with a warning; acceptance permits an attempt and
+  is not readiness or capability proof.
 - Node.js on the remote Codex app-server host when `remoteWorkspaceRoot` is set
   and cross-machine workspace attachments must be transferred.
 - Codex auth through `openclaw models auth login --provider openai`, an
@@ -1352,11 +1355,12 @@ instead of a plain OpenAI API-key failure.
 Doctor rewrites legacy model refs to `openai/*`, removes stale session and
 whole-agent runtime pins, and preserves existing auth-profile overrides.
 
-**The app-server is rejected:** use exactly stable Codex `0.147.0`. Older or
-newer versions, prereleases, build-suffixed versions, and unversioned servers
-are rejected because OpenClaw validates generated schemas and runtime contracts
-against the Codex version it ships. Update or remove custom, remote, or desktop
-binary overrides that select another version.
+**The app-server is rejected:** use Codex `0.147.0` or newer. OpenClaw rejects
+older, malformed, and unversioned servers. Same-version prereleases such as
+`0.147.0-alpha.2` remain below the stable minimum; build metadata such as
+`0.147.0+desktop` does not affect precedence. A newer external version is
+permitted to initialize rather than treated as proof of compatibility, so
+startup and capability operations can still fail with their normal diagnostics.
 
 **`/codex status` cannot connect:** check that the `codex` plugin
 is enabled, that `plugins.allow` includes it when an allowlist is
