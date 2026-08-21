@@ -18,6 +18,8 @@ import {
   replaceSessionEntry,
 } from "../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { GatewayTransportError } from "../gateway/transport-error.js";
+import { readExecApprovalsSnapshot, saveExecApprovals } from "../infra/exec-approvals.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { readAgentDeletionJournal } from "../state/agent-deletion-journal.js";
 import { readAgentProvenance, recordAgentProvenance } from "../state/agent-provenance.js";
@@ -45,7 +47,6 @@ const fsSafeMocks = vi.hoisted(() => ({
 const gatewayMocks = vi.hoisted(() => ({
   callGateway: vi.fn(),
   isGatewayCredentialsRequiredError: vi.fn(),
-  isGatewayTransportError: vi.fn(),
 }));
 
 const workspaceStateMocks = vi.hoisted(() => ({
@@ -66,10 +67,12 @@ vi.mock("../config/config.js", async () => ({
   replaceConfigFile: configMocks.replaceConfigFile,
 }));
 
-vi.mock("../gateway/call.js", () => ({
+vi.mock("../gateway/call.js", async () => ({
+  ...(await vi.importActual<typeof import("../gateway/transport-error.js")>(
+    "../gateway/transport-error.js",
+  )),
   callGateway: gatewayMocks.callGateway,
   isGatewayCredentialsRequiredError: gatewayMocks.isGatewayCredentialsRequiredError,
-  isGatewayTransportError: gatewayMocks.isGatewayTransportError,
 }));
 
 vi.mock("../infra/fs-safe.js", () => ({
@@ -100,6 +103,15 @@ vi.mock("../wizard/clack-prompter.js", () => ({
 import { agentsDeleteCommand } from "./agents.commands.delete.js";
 
 const runtime = createTestRuntime();
+
+function gatewayTransportError(kind: "closed" | "timeout", code?: number): GatewayTransportError {
+  return new GatewayTransportError({
+    kind,
+    code,
+    message: `gateway ${kind}`,
+    connectionDetails: { url: "ws://127.0.0.1:1", urlSource: "test", message: "test gateway" },
+  });
+}
 
 function resolveFixtureStoreAgentId(cfg: OpenClawConfig, deletedAgentId: string): string {
   const storeConfig = cfg.session?.store;
@@ -212,17 +224,11 @@ describe("agents delete command", () => {
     workspaceStateMocks.deleteWorkspaceState.mockClear();
     processMocks.runCommandWithTimeout.mockClear();
     gatewayMocks.callGateway.mockReset();
-    gatewayMocks.callGateway.mockRejectedValue(
-      Object.assign(new Error("closed"), { name: "GatewayTransportError" }),
-    );
+    gatewayMocks.callGateway.mockRejectedValue(gatewayTransportError("closed"));
     gatewayMocks.isGatewayCredentialsRequiredError.mockReset();
     gatewayMocks.isGatewayCredentialsRequiredError.mockImplementation(
       (error: unknown) =>
         error instanceof Error && error.name === "GatewayCredentialsRequiredError",
-    );
-    gatewayMocks.isGatewayTransportError.mockReset();
-    gatewayMocks.isGatewayTransportError.mockImplementation(
-      (error: unknown) => error instanceof Error && error.name === "GatewayTransportError",
     );
     runtime.log.mockClear();
     runtime.error.mockClear();
@@ -314,6 +320,14 @@ describe("agents delete command", () => {
           "agent:main:main": { sessionId: "sess-main", updatedAt: Date.now() },
         },
       });
+      saveExecApprovals({
+        version: 1,
+        agents: {
+          "*": { security: "deny" },
+          main: { security: "allowlist", allowlist: [{ pattern: "/usr/bin/old" }] },
+          ops: { security: "allowlist", allowlist: [{ pattern: "/usr/bin/keep" }] },
+        },
+      });
 
       await agentsDeleteCommand({ id: "main", force: true, json: true }, runtime);
 
@@ -321,6 +335,13 @@ describe("agents delete command", () => {
       expect(runtime.exit).not.toHaveBeenCalledWith(1);
       expect(configMocks.replaceConfigFile).toHaveBeenCalledOnce();
       expectSessionStore(cfg, {}, "main");
+      expect(readExecApprovalsSnapshot().file.agents).toEqual({
+        "*": { security: "deny" },
+        ops: {
+          security: "allowlist",
+          allowlist: [expect.objectContaining({ pattern: "/usr/bin/keep" })],
+        },
+      });
     });
   });
 
@@ -454,6 +475,32 @@ describe("agents delete command", () => {
     });
   });
 
+  it.each([
+    { label: "request timeout after dispatch", error: gatewayTransportError("timeout") },
+    { label: "established WebSocket close", error: gatewayTransportError("closed", 1006) },
+    { label: "authentication rejection", error: new Error("unauthorized") },
+    {
+      label: "malformed transport failure",
+      error: Object.assign(new Error("malformed transport failure"), {
+        name: "GatewayTransportError",
+        kind: "closed",
+      }),
+    },
+  ])("surfaces $label without replaying deletion locally", async ({ error }) => {
+    await withStateDirEnv("openclaw-agents-delete-ambiguous-", async ({ stateDir }) => {
+      const cfg: OpenClawConfig = { agents: { list: [{ id: "main" }, { id: "ops" }] } };
+      const sessions = { "agent:ops:main": { sessionId: "sess-ops", updatedAt: Date.now() } };
+      await arrangeAgentsDeleteTest({ stateDir, cfg, sessions });
+      gatewayMocks.callGateway.mockRejectedValue(error);
+
+      await expect(agentsDeleteCommand({ id: "ops", force: true }, runtime)).rejects.toBe(error);
+
+      expect(configMocks.replaceConfigFile).not.toHaveBeenCalled();
+      expect(fsSafeMocks.movePathToTrash).not.toHaveBeenCalled();
+      expectSessionStore(cfg, sessions);
+    });
+  });
+
   it("falls back to local deletion when the optional Gateway probe needs credentials", async () => {
     await withStateDirEnv("openclaw-agents-delete-gateway-auth-", async ({ stateDir }) => {
       const now = Date.now();
@@ -539,6 +586,7 @@ describe("agents delete command", () => {
           "agent:main:main": { sessionId: "sess-main", updatedAt: now + 3 },
         },
       });
+      expect(readExecApprovalsSnapshot().exists).toBe(false);
 
       await agentsDeleteCommand({ id: "ops", force: true, json: true }, runtime);
 
@@ -560,6 +608,7 @@ describe("agents delete command", () => {
       expectSessionStore(cfg, {
         "agent:main:main": { sessionId: "sess-main", updatedAt: now + 3 },
       });
+      expect(readExecApprovalsSnapshot().exists).toBe(false);
     });
   });
 
