@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { sliceUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { z } from "zod";
 import { coerceErrorMessage } from "../lib/error-format.mts";
@@ -24,6 +25,18 @@ type JsonObject = Record<string, unknown>;
 type MantisSutLane = "baseline" | "candidate";
 type SpawnedDaemon = { child: ReturnType<typeof spawn>; error?: Error };
 
+function mergeConfig(base: unknown, patch: Record<string, unknown>): Record<string, unknown> {
+  const merged = isRecord(base) ? { ...base } : {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete merged[key];
+    } else {
+      merged[key] = isRecord(value) ? mergeConfig(merged[key], value) : value;
+    }
+  }
+  return merged;
+}
+
 type MantisSutRuntime = {
   configPath: string;
   containerName: string;
@@ -37,6 +50,8 @@ type MantisSutRuntime = {
   gatewayPid: number;
   mockLog: string;
   mockResponseControl: string;
+  proxyControl: string;
+  proxyRequestLog: string;
   requestLog: string;
   stateDir: string;
   sutAttestation: { lane: MantisSutLane; sha: string };
@@ -46,7 +61,14 @@ type MantisSutRuntime = {
 
 export type MantisSutRecovery = Pick<
   MantisSutRuntime,
-  "containerName" | "gatewayLog" | "mockLog" | "mockResponseControl" | "requestLog" | "tempRoot"
+  | "containerName"
+  | "gatewayLog"
+  | "mockLog"
+  | "mockResponseControl"
+  | "proxyControl"
+  | "proxyRequestLog"
+  | "requestLog"
+  | "tempRoot"
 >;
 
 function childProcessBaseEnv(): NodeJS.ProcessEnv {
@@ -156,10 +178,9 @@ export function createOpenClawGatewaySpawnSpec(params: {
 }
 
 export function writeSutConfig(params: {
+  configPatch?: Record<string, unknown>;
   gatewayPort: number;
   groupId: string;
-  humanDelayFixedMs?: number;
-  linkPreview?: boolean;
   mcpAppFixture?: boolean;
   mockPort: number;
   outputDir: string;
@@ -172,18 +193,9 @@ export function writeSutConfig(params: {
   fs.mkdirSync(stateDir, { recursive: true });
   fs.mkdirSync(workspace, { recursive: true });
   const configPath = path.join(tempRoot, "openclaw.json");
-  const config = {
+  const baseConfig = {
     agents: {
       defaults: {
-        ...(params.humanDelayFixedMs === undefined
-          ? {}
-          : {
-              humanDelay: {
-                maxMs: params.humanDelayFixedMs,
-                minMs: params.humanDelayFixedMs,
-                mode: "custom",
-              },
-            }),
         model: { primary: "openai/gpt-5.6-luna" },
         models: {
           "openai/gpt-5.6-luna": { params: { openaiWsWarmup: false, transport: "sse" } },
@@ -216,9 +228,9 @@ export function writeSutConfig(params: {
             requireMention: false,
           },
         },
-        ...(params.linkPreview === undefined ? {} : { linkPreview: params.linkPreview }),
       },
     },
+    commands: { ownerAllowFrom: [`telegram:${params.testerId}`] },
     gateway: params.mcpAppFixture
       ? {
           auth: {
@@ -277,6 +289,7 @@ export function writeSutConfig(params: {
       entries: { openai: { enabled: true }, telegram: { enabled: true } },
     },
   };
+  const config = mergeConfig(baseConfig, params.configPatch ?? {});
   fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
   return { configPath, stateDir, tempRoot, workspace };
 }
@@ -499,10 +512,15 @@ export function runSutContainerAction(
 }
 
 export function preserveMantisSutRuntimeArtifacts(
-  sut: Pick<MantisSutRuntime, "gatewayLog" | "mockLog" | "requestLog">,
+  sut: Pick<MantisSutRuntime, "gatewayLog" | "mockLog" | "requestLog"> & {
+    proxyRequestLog?: string;
+  },
   outputDir: string,
 ): void {
-  for (const source of [sut.gatewayLog, sut.mockLog, sut.requestLog]) {
+  for (const source of [sut.gatewayLog, sut.mockLog, sut.requestLog, sut.proxyRequestLog]) {
+    if (!source) {
+      continue;
+    }
     const target = path.join(outputDir, path.basename(source));
     if (path.resolve(source) !== path.resolve(target) && fs.existsSync(source)) {
       fs.copyFileSync(source, target);
@@ -526,10 +544,9 @@ function cleanupFailureMessage(message: string, cleanupErrors: unknown[]): strin
 }
 
 export async function startMantisSut(params: {
+  configPatch?: Record<string, unknown>;
   gatewayPort: number;
   groupId: string;
-  humanDelayFixedMs?: number;
-  linkPreview?: boolean;
   mockPort: number;
   mockResponseChunkDelayMs?: number;
   mockResponseText: string;
@@ -559,6 +576,12 @@ export async function startMantisSut(params: {
     })}\n`,
     { mode: 0o600 },
   );
+  const proxyControlDir = path.join(config.tempRoot, "proxy-control");
+  fs.mkdirSync(proxyControlDir, { mode: 0o700 });
+  const proxyControl = path.join(proxyControlDir, "control.json");
+  const proxyRequestLog = path.join(proxyControlDir, "requests.ndjson");
+  fs.writeFileSync(proxyControl, '{"rules":[]}\n', { mode: 0o600 });
+  fs.writeFileSync(proxyRequestLog, "", { mode: 0o600 });
   const gatewayLog = path.join(config.tempRoot, "gateway.log");
   const gatewayEnv = createMantisGatewayEnv({ ...config, sutToken: params.sutToken });
   const containerName = `openclaw-telegram-sut-${randomUUID()}`;
@@ -578,6 +601,8 @@ export async function startMantisSut(params: {
     gatewayLog,
     mockLog,
     mockResponseControl,
+    proxyControl,
+    proxyRequestLog,
     requestLog,
     tempRoot: config.tempRoot,
   });
@@ -614,6 +639,8 @@ export async function startMantisSut(params: {
       gatewayPid,
       mockLog,
       mockResponseControl,
+      proxyControl,
+      proxyRequestLog,
       requestLog,
       sutAttestation,
     };
@@ -628,7 +655,10 @@ export async function startMantisSut(params: {
     }
     if (stopped) {
       try {
-        preserveMantisSutRuntimeArtifacts({ gatewayLog, mockLog, requestLog }, params.outputDir);
+        preserveMantisSutRuntimeArtifacts(
+          { gatewayLog, mockLog, proxyRequestLog, requestLog },
+          params.outputDir,
+        );
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError);
       }
