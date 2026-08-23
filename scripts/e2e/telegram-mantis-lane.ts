@@ -12,11 +12,20 @@ import { coerceErrorMessage } from "../lib/error-format.mts";
 import { sleep } from "../lib/sleep.mjs";
 import { telegramBotApi } from "./telegram-bot-api.ts";
 import {
+  RECORDER_AUTHORIZATION_FAILURE_FILENAME,
+  recorderAuthorizationFailureSchema,
+  recorderAuthorizationFailureFactSchema,
+  type RecorderAuthorizationFailure,
+} from "./telegram-desktop-recorder-contract.ts";
+import {
   destroyMantisSut,
+  execMantisSut,
   type MantisSutRecovery,
   preserveMantisSutRuntimeArtifacts,
+  restartMantisSut,
   startMantisSut,
   stopMantisSut,
+  waitForLogAfter,
 } from "./telegram-mantis-sut.ts";
 
 const execFileAsync = promisify(execFile);
@@ -115,9 +124,19 @@ const invocationSchema = z.object({
   at: z.string(),
   command: z.string(),
   cursor: z.number().int().nonnegative().optional(),
+  exitCode: z.number().int().optional(),
+  stderrBytes: z.number().int().nonnegative().optional(),
+  stdoutBytes: z.number().int().nonnegative().optional(),
 });
 const recorderArtifactsSchema = z.object({
   artifacts: z.record(z.string(), z.string()),
+});
+const desktopRecorderFailureBudgetSchema = z.object({
+  attemptCount: z.number().int().positive(),
+  classification: recorderAuthorizationFailureSchema.shape.classification,
+  loginScreenshotPath: z.string().optional(),
+  schemaVersion: z.literal(1),
+  unavailable: z.boolean(),
 });
 const activeSessionSchema = z.object({
   attempt: z.number().int().positive(),
@@ -151,8 +170,11 @@ type ObserverResponse = {
   ok: boolean;
   truncated?: boolean;
 } & Record<string, unknown>;
+type DesktopRecorderFailureBudget = z.infer<typeof desktopRecorderFailureBudgetSchema>;
 
-const MAX_SENDS = 12;
+// Shared-QA-bot flood-safety ceiling; this is not a scenario or feasibility bound.
+const MAX_SENDS = 40;
+const MAX_EXEC_COMMAND_BYTES = 64 * 1024;
 const MAX_RPC_BYTES = 4 * 1024 * 1024;
 const commandOptions: Record<string, readonly string[]> = {
   abort: ["--lane"],
@@ -162,6 +184,7 @@ const commandOptions: Record<string, readonly string[]> = {
   "botapi-requests": ["--lane", "--method", "--limit"],
   delete: ["--lane", "--message-id"],
   desktop: ["--lane", "--actions-file", "--timeout-seconds"],
+  exec: ["--lane", "--timeout-seconds", "--command", "--command-file"],
   finish: ["--lane", "--focus-message-id"],
   mock: [
     "--lane",
@@ -181,6 +204,7 @@ const commandOptions: Record<string, readonly string[]> = {
   ],
   press: ["--lane", "--message-id", "--button"],
   requests: ["--lane"],
+  restart: ["--lane", "--ready-timeout-seconds"],
   screenshot: ["--lane"],
   send: ["--lane", "--text", "--text-file", "--media", "--reply-to"],
   start: ["--lane", "--repo-root", "--config"],
@@ -315,6 +339,98 @@ function writeJsonAtomic(file: string, value: unknown, mode = 0o600): void {
   fs.chmodSync(file, mode);
 }
 
+function desktopRecorderFailureBudgetFile(sessionRoot: string): string {
+  return path.join(sessionRoot, "desktop-recorder-failures.json");
+}
+
+function readDesktopRecorderFailureBudget(
+  sessionRoot: string,
+): DesktopRecorderFailureBudget | undefined {
+  const file = desktopRecorderFailureBudgetFile(sessionRoot);
+  return fs.existsSync(file) ? desktopRecorderFailureBudgetSchema.parse(readJson(file)) : undefined;
+}
+
+function desktopUnavailableMessage(fact: DesktopRecorderFailureBudget, factFile: string): string {
+  const screenshotDetail = fact.loginScreenshotPath
+    ? `, loginScreenshotPath=${fact.loginScreenshotPath}`
+    : "";
+  return (
+    `desktop-unavailable: stop retrying; this run's desktop is unavailable ` +
+    `(attemptCount=${fact.attemptCount}, classification=${fact.classification}${screenshotDetail}, ` +
+    `fact=${factFile})`
+  );
+}
+
+function assertDesktopRecorderAvailable(sessionRoot: string): void {
+  const fact = readDesktopRecorderFailureBudget(sessionRoot);
+  if (fact?.unavailable) {
+    throw new Error(desktopUnavailableMessage(fact, desktopRecorderFailureBudgetFile(sessionRoot)));
+  }
+}
+
+function recordDesktopRecorderFailures(
+  sessionRoot: string,
+  failures: RecorderAuthorizationFailure[],
+): DesktopRecorderFailureBudget | undefined {
+  if (failures.length === 0) {
+    return readDesktopRecorderFailureBudget(sessionRoot);
+  }
+  const prior = readDesktopRecorderFailureBudget(sessionRoot);
+  const latest = failures.at(-1);
+  if (!latest) {
+    return prior;
+  }
+  const attemptCount = (prior?.attemptCount ?? 0) + failures.length;
+  const fact = desktopRecorderFailureBudgetSchema.parse({
+    attemptCount,
+    classification: latest.classification,
+    loginScreenshotPath: latest.loginScreenshotPath,
+    schemaVersion: 1,
+    unavailable: attemptCount >= 2,
+  });
+  writeJsonAtomic(desktopRecorderFailureBudgetFile(sessionRoot), fact);
+  return fact;
+}
+
+export async function startDesktopRecorder(params: {
+  chat: string;
+  outputDir: string;
+  recorderCommand: string;
+  sessionPath: string;
+  sessionRoot: string;
+  userDriver: string;
+}): Promise<void> {
+  assertDesktopRecorderAvailable(params.sessionRoot);
+  try {
+    await runCommand(params.recorderCommand, [
+      "start",
+      "--provider",
+      "docker",
+      "--session",
+      recorderRelativePath(params.sessionPath),
+      "--output-dir",
+      recorderRelativePath(params.outputDir),
+      "--chat",
+      params.chat,
+      "--user-driver",
+      params.userDriver,
+    ]);
+  } catch (startError) {
+    const failureFile = path.join(params.outputDir, RECORDER_AUTHORIZATION_FAILURE_FILENAME);
+    const failures = fs.existsSync(failureFile)
+      ? recorderAuthorizationFailureFactSchema.parse(readJson(failureFile)).failures
+      : [];
+    const budget = recordDesktopRecorderFailures(params.sessionRoot, failures);
+    if (budget?.unavailable) {
+      throw new Error(
+        `${desktopUnavailableMessage(budget, desktopRecorderFailureBudgetFile(params.sessionRoot))}\n${coerceErrorMessage(startError)}`,
+        { cause: startError },
+      );
+    }
+    throw startError;
+  }
+}
+
 function publicRelativePath(root: string, file: string, label: string): string {
   const resolvedRoot = fs.realpathSync(root);
   const relative = path.relative(resolvedRoot, file);
@@ -437,12 +553,14 @@ function appendInvocation(
   command: string,
   args: Record<string, unknown>,
   cursor?: number,
+  result?: { exitCode: number; stderrBytes: number; stdoutBytes: number },
 ): void {
   state.invocations.push({
     args,
     at: new Date().toISOString(),
     command,
     ...(cursor === undefined ? {} : { cursor }),
+    ...result,
   });
   if (cursor !== undefined) {
     state.lastCursor = cursor;
@@ -576,21 +694,19 @@ function redact(value: unknown, secret: string): unknown {
   return value;
 }
 
+function redactSutValue(value: unknown, sutToken: string): unknown {
+  const botId = sutToken.split(":", 1)[0] ?? "";
+  const aliasToken = botId ? `${botId}:${"A".repeat(35)}` : "";
+  return redact(redact(value, sutToken), aliasToken);
+}
+
 function providerRequests(state: ActiveSession, secret: string): unknown[] {
-  if (!fs.existsSync(state.sut.requestLog)) {
-    return [];
-  }
-  return fs
-    .readFileSync(state.sut.requestLog, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .slice(0, 100)
-    .map((line, index) =>
-      Object.assign(
-        { index: index + 1 },
-        redact(JSON.parse(line), secret) as Record<string, unknown>,
-      ),
-    );
+  // Tail window, like botApiRequests: a long session must surface its newest
+  // provider turns. Entries carry a producer-stamped `seq` ordinal, so the
+  // window keeps absolute order without rereading the whole file.
+  return boundedNdjson(state.sut.requestLog, 128).map(
+    (entry) => redact(entry, secret) as Record<string, unknown>,
+  );
 }
 
 function boundedNdjson(file: string, limit: number): unknown[] {
@@ -801,17 +917,17 @@ async function startLane(values: Map<string, string>, roots: Roots): Promise<voi
   ) {
     throw new Error(`Finish or abort the active ${otherLane} session first.`);
   }
+  assertDesktopRecorderAvailable(roots.sessionRoot);
   const attemptsRoot = path.join(roots.sessionRoot, "attempts", lane);
   fs.mkdirSync(attemptsRoot, { recursive: true });
   const attempt = fs.readdirSync(attemptsRoot).filter((entry) => /^\d+$/u.test(entry)).length + 1;
   const privateDir = path.join(attemptsRoot, String(attempt));
   fs.mkdirSync(privateDir, { mode: 0o770 });
-  const recorderSession = path.join(privateDir, "recorder.json");
+  const recorderSession = path.join(roots.sessionRoot, "desktop-recorder.json");
   const observerSocket = path.join(privateDir, "observer.sock");
   const observerJournal = path.join(privateDir, "telegram-events.ndjson");
   const observerLog = path.join(privateDir, "observer.log");
   const observerPidFile = path.join(privateDir, "observer.pid.json");
-  const recorderOutputDir = recorderRelativePath(privateDir);
   const startup: StartupSession = {
     attempt,
     lane,
@@ -839,6 +955,7 @@ async function startLane(values: Map<string, string>, roots: Roots): Promise<voi
       telegramBotApi(credential.sutToken, "getMe"),
       startMantisSut({
         configPatch: config.configPatch,
+        fixturePluginsDir: path.join(roots.sessionRoot, "fixture-plugins", lane),
         gatewayPort: ports.gateway,
         groupId: credential.groupId,
         mockPort: ports.mock,
@@ -858,17 +975,14 @@ async function startLane(values: Map<string, string>, roots: Roots): Promise<voi
           saveStartup(roots.sessionRoot, startup);
         },
       }),
-      runCommand(requiredEnv("OPENCLAW_TELEGRAM_DESKTOP_RECORDER_CMD"), [
-        "start",
-        "--provider",
-        "docker",
-        "--output-dir",
-        recorderOutputDir,
-        "--chat",
-        credential.groupId,
-        "--user-driver",
-        requiredEnv("OPENCLAW_TELEGRAM_USER_DRIVER_CMD"),
-      ]),
+      startDesktopRecorder({
+        chat: credential.groupId,
+        outputDir: privateDir,
+        recorderCommand: requiredEnv("OPENCLAW_TELEGRAM_DESKTOP_RECORDER_CMD"),
+        sessionPath: recorderSession,
+        sessionRoot: roots.sessionRoot,
+        userDriver: requiredEnv("OPENCLAW_TELEGRAM_USER_DRIVER_CMD"),
+      }),
     ]);
     if (sutResult.status === "fulfilled") {
       sut = sutResult.value;
@@ -1436,6 +1550,85 @@ async function runDesktopActions(
   return { ...result, actionsSha256 };
 }
 
+function readExecCommand(values: Map<string, string>, outputRoot: string): string {
+  const direct = values.get("--command");
+  const commandFile = values.get("--command-file");
+  if ((direct === undefined) === (commandFile === undefined)) {
+    throw new Error("exec needs exactly one of --command or --command-file.");
+  }
+  const command =
+    commandFile !== undefined
+      ? readPublicFile(outputRoot, commandFile, "--command-file", MAX_EXEC_COMMAND_BYTES).text
+      : (direct ?? "");
+  const bytes = Buffer.byteLength(command);
+  if (bytes < 1 || bytes > MAX_EXEC_COMMAND_BYTES) {
+    throw new Error(`exec command must contain 1 to ${MAX_EXEC_COMMAND_BYTES} bytes.`);
+  }
+  return command;
+}
+
+async function runSutExec(
+  state: ActiveSession,
+  values: Map<string, string>,
+  roots: Roots,
+  sutToken: string,
+): Promise<Record<string, unknown>> {
+  const command = readExecCommand(values, roots.outputRoot);
+  const timeoutSeconds = values.has("--timeout-seconds")
+    ? numberOption(values, "--timeout-seconds", 1_800, 1)
+    : 120;
+  const result = await execMantisSut(state.sut, command, timeoutSeconds);
+  const redactedCommand = redactSutValue(command, sutToken) as string;
+  appendInvocation(state, "exec", { command: redactedCommand, timeoutSeconds }, undefined, {
+    exitCode: result.exitCode,
+    stderrBytes: result.stderrBytes,
+    stdoutBytes: result.stdoutBytes,
+  });
+  return redactSutValue(
+    {
+      exitCode: result.exitCode,
+      stderr: result.stderr,
+      stdout: result.stdout,
+      truncated: result.truncated,
+    },
+    sutToken,
+  ) as Record<string, unknown>;
+}
+
+async function restartSutGateway(
+  state: ActiveSession,
+  values: Map<string, string>,
+  roots: Roots,
+): Promise<Record<string, unknown>> {
+  const readyTimeoutSeconds = values.has("--ready-timeout-seconds")
+    ? numberOption(values, "--ready-timeout-seconds", 300, 1)
+    : 60;
+  const logOffset = fs.statSync(state.sut.gatewayLog).size;
+  const restartedAt = new Date().toISOString();
+  const startedAt = Date.now();
+  try {
+    restartMantisSut(state.sut);
+    await waitForLogAfter(
+      state.sut.gatewayLog,
+      logOffset,
+      /\[gateway\] ready/u,
+      "restarted gateway",
+      readyTimeoutSeconds * 1_000,
+    );
+  } catch (error) {
+    appendInvocation(state, "restart", {
+      readyAfterMs: Date.now() - startedAt,
+      readyTimeoutSeconds,
+      status: "failed",
+    });
+    saveActive(roots.sessionRoot, state);
+    throw error;
+  }
+  const readyAfterMs = Date.now() - startedAt;
+  appendInvocation(state, "restart", { readyAfterMs, readyTimeoutSeconds });
+  return { readyAfterMs, restartedAt, status: "ready" };
+}
+
 async function focusMessage(state: ActiveSession, messageId: string): Promise<void> {
   if (!/^\d+$/u.test(messageId) || BigInt(messageId) < 1n) {
     throw new Error("--message-id must be a positive Telegram server message id.");
@@ -1879,6 +2072,10 @@ async function main(): Promise<void> {
       outputJson({ count: requests.length, requests });
     } else if (cli.command === "desktop") {
       outputJson(await runDesktopActions(state, cli.values, roots));
+    } else if (cli.command === "exec") {
+      outputJson(await runSutExec(state, cli.values, roots, credential.sutToken));
+    } else if (cli.command === "restart") {
+      outputJson(await restartSutGateway(state, cli.values, roots));
     } else if (cli.command === "send") {
       const sent = await sendVisibleMessage(state, cli.values, roots, credential.sutToken);
       outputJson({ ...sent.response, revealedMessageId: sent.revealedMessageId });
