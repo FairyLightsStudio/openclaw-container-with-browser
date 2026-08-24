@@ -611,13 +611,21 @@ export function resolveTuiShutdownHardExitMs(params: { localMode?: boolean } = {
   return TUI_SHUTDOWN_HARD_EXIT_MS + (params.localMode ? resolveLocalRunShutdownGraceMs() : 0);
 }
 
+type ScheduleProcessExitAfterTuiReturnParams = {
+  delayMs?: number;
+  setTimeoutFn?: TuiProcessExitTimeout;
+  exit?: (code?: number) => never | void;
+  writeStderr?: (text: string) => void;
+};
+
 export function scheduleProcessExitAfterTuiReturn(
-  params: {
-    delayMs?: number;
-    setTimeoutFn?: TuiProcessExitTimeout;
-    exit?: (code?: number) => never | void;
-    writeStderr?: (text: string) => void;
-  } = {},
+  params?: ScheduleProcessExitAfterTuiReturnParams & { setTimeoutFn?: undefined },
+): ReturnType<typeof setTimeout>;
+export function scheduleProcessExitAfterTuiReturn(
+  params: ScheduleProcessExitAfterTuiReturnParams & { setTimeoutFn: TuiProcessExitTimeout },
+): TuiProcessExitTimer;
+export function scheduleProcessExitAfterTuiReturn(
+  params: ScheduleProcessExitAfterTuiReturnParams = {},
 ): TuiProcessExitTimer {
   const delayMs = Math.max(0, Math.floor(params.delayMs ?? TUI_PROCESS_EXIT_AFTER_RETURN_MS));
   const exit = params.exit ?? ((code?: number) => process.exit(code));
@@ -639,6 +647,10 @@ export function scheduleProcessExitAfterTuiReturn(
     : setTimeout(onTimeout, delayMs);
   timer.unref?.();
   return timer;
+}
+
+export function cancelProcessExitAfterTuiReturn(timer: ReturnType<typeof setTimeout>): void {
+  clearTimeout(timer);
 }
 
 type CtrlCAction = "clear" | "warn" | "exit";
@@ -1446,7 +1458,11 @@ async function runTuiUnlocked(opts: RunTuiOptions): Promise<TuiResult> {
     const activeRunAtStart = state.activeChatRunId;
     const result = await loadHistorySnapshot();
     if (result.loaded) {
-      if (reconcileReconnect && activeRunAtStart && activeRunAtStart === state.activeChatRunId) {
+      // History can adopt a newer run before returning; terminal outcomes
+      // still belong only to the unchanged run captured before the request.
+      const recoveredRunId =
+        result.runOutcome.state === "active" ? result.runOutcome.runId : activeRunAtStart;
+      if (reconcileReconnect && recoveredRunId && recoveredRunId === state.activeChatRunId) {
         reconcileReconnectRun(result.runOutcome);
       }
       restoreConnectionNotices();
