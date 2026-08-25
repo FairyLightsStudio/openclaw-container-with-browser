@@ -1000,7 +1000,66 @@ private final class BatteryMonitoringDevice: UIDevice {
     }
 }
 
+@MainActor
+private final class TimingOutDeviceStatusService: DeviceStatusServicing {
+    func status() async throws -> OpenClawDeviceStatusPayload {
+        throw URLError(.timedOut)
+    }
+
+    func info() -> OpenClawDeviceInfoPayload {
+        DeviceStatusService().info()
+    }
+}
+
 @Suite(.serialized) struct NodeAppModelInvokeTests {
+    @Test @MainActor func `throttled silent push reports no data while background refresh remains successful`() async {
+        let lastSuccessKey = "gateway.backgroundAlive.lastSuccessAtMs"
+        let previousSuccess = UserDefaults.standard.object(forKey: lastSuccessKey)
+        defer {
+            if let previousSuccess {
+                UserDefaults.standard.set(previousSuccess, forKey: lastSuccessKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: lastSuccessKey)
+            }
+        }
+        UserDefaults.standard.set(Date().timeIntervalSince1970 * 1000, forKey: lastSuccessKey)
+
+        let appModel = NodeAppModel()
+        appModel.isBackgrounded = true
+        appModel.gatewayConnected = true
+        let delegate = OpenClawAppDelegate()
+        delegate.appModel = appModel
+
+        let result = await withCheckedContinuation { continuation in
+            delegate.application(
+                UIApplication.shared,
+                didReceiveRemoteNotification: ["aps": ["content-available": 1]],
+                fetchCompletionHandler: { continuation.resume(returning: $0) })
+        }
+
+        #expect(result == .noData)
+        #expect(await appModel.handleBackgroundRefreshWake())
+    }
+
+    @Test func `network status timeout never invents offline network facts`() async {
+        await #expect(throws: URLError(.timedOut)) {
+            try await NetworkStatusService().currentStatus(timeoutMs: 0)
+        }
+    }
+
+    @Test @MainActor func `device status reports unavailable when its network observation times out`() async {
+        let appModel = NodeAppModel(deviceStatusService: TimingOutDeviceStatusService())
+        let request = BridgeInvokeRequest(
+            id: "device-status-network-timeout",
+            command: OpenClawDeviceCommand.status.rawValue,
+            paramsJSON: "{}")
+
+        let response = await appModel.handleInvoke(request)
+
+        #expect(response.ok == false)
+        #expect(response.error?.code == .unavailable)
+    }
+
     @Test @MainActor func `device status battery snapshot preserves monitoring ownership`() {
         for initial in [false, true] {
             let device = BatteryMonitoringDevice(monitoringEnabled: initial)
@@ -1010,7 +1069,7 @@ private final class BatteryMonitoringDevice: UIDevice {
             #expect(payload.level == 0.5)
             #expect(payload.state == .charging)
             #expect(!device.monitoringStatesDuringBatteryReads.isEmpty)
-            #expect(device.monitoringStatesDuringBatteryReads.allSatisfy { $0 })
+            #expect(!device.monitoringStatesDuringBatteryReads.contains(false))
             #expect(device.isBatteryMonitoringEnabled == initial)
         }
     }
