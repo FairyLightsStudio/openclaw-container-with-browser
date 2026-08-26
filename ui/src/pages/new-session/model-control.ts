@@ -18,13 +18,14 @@ import {
 import { isChatModelUnavailable } from "../../lib/chat/model-select-state.ts";
 import { normalizeThinkingOptionValue } from "../../lib/chat/thinking.ts";
 import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
+import { loadModels } from "../../lib/model-catalog-store.ts";
 import { normalizeAgentId } from "../../lib/sessions/session-key.ts";
 import {
   renderChatModelControls,
   type ChatModelCatalogState,
 } from "../chat/components/chat-model-controls.ts";
 import type { ChatModelPickerTargetGroup } from "../chat/components/chat-model-picker-options.ts";
-import type { DraftCloudProfile } from "./discovery.ts";
+import { draftCloudProfileSupportsExecutionMode, type DraftCloudProfile } from "./discovery.ts";
 import type { NewSessionPreference } from "./preferences.ts";
 
 type NewSessionMetadataClient = NonNullable<ApplicationContext["gateway"]["snapshot"]["client"]>;
@@ -327,10 +328,26 @@ export class NewSessionModelControl {
     );
   }
 
-  private retryPickerCatalogs() {
+  private retryPickerCatalogs(refreshReadyMetadata = false) {
     const metadataClient = this.metadataClient;
     if (this.metadataState.status === "error" && metadataClient && this.agentId) {
       this.startMetadataRequest(metadataClient, this.agentId);
+    } else if (
+      refreshReadyMetadata &&
+      this.metadataState.status === "ready" &&
+      metadataClient &&
+      this.agentId
+    ) {
+      const agentId = this.agentId;
+      void loadModels(metadataClient, {
+        agentId,
+        refreshIfDue: true,
+        rejectOnFailure: true,
+      }).catch(() => {
+        if (this.metadataClient === metadataClient && this.agentId === agentId) {
+          this.updateMetadataState({ ...this.metadataState, status: "error" });
+        }
+      });
     }
     const targetDiscovery = this.catalogTargetDiscovery;
     if (
@@ -584,9 +601,9 @@ export class NewSessionModelControl {
       return t("newSession.cloudRuntimeUnsupported", { runtime: runtime.id });
     }
     return runtime &&
-      profile?.executionMode &&
+      profile &&
       runtime.cloudPlacementExecutionMode &&
-      profile.executionMode !== runtime.cloudPlacementExecutionMode
+      !draftCloudProfileSupportsExecutionMode(profile, runtime.cloudPlacementExecutionMode)
       ? t("newSession.cloudProfileRuntimeUnsupported", { runtime: runtime.id })
       : undefined;
   }
@@ -693,7 +710,7 @@ export class NewSessionModelControl {
         this.notify();
       },
       onModelSetup: () => options.context?.navigate("model-setup"),
-      onModelPickerOpen: () => this.retryPickerCatalogs(),
+      onModelPickerOpen: () => this.retryPickerCatalogs(true),
       onRequestUpdate: this.notify,
     });
   }
