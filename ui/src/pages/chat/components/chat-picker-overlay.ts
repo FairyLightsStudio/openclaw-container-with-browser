@@ -63,7 +63,7 @@ function dismissChatComposerPickersOutside(event: PointerEvent): void {
 }
 
 function dismissChatComposerPickersOnEscape(event: KeyboardEvent): void {
-  if (event.key !== "Escape") {
+  if (event.key !== "Escape" || document.querySelector(".shell-nav[aria-modal='true']")) {
     return;
   }
   const pickers = openChatComposerPickers();
@@ -75,14 +75,14 @@ function dismissChatComposerPickersOnEscape(event: KeyboardEvent): void {
   }
   event.preventDefault();
   event.stopPropagation();
-  const trigger = pickers.at(-1);
+  const lastPicker = pickers.at(-1);
   pickers.forEach(closeComposerPicker);
   invocationComposer?.dispatchEvent(new CustomEvent(CHAT_COMPOSER_DISMISS_INVOCATIONS_EVENT));
   invocationComposer
     ?.querySelector<HTMLTextAreaElement>(".agent-chat__composer-combobox > textarea")
     ?.focus({ preventScroll: true });
-  if (trigger) {
-    pickerTrigger(trigger)?.focus({ preventScroll: true });
+  if (lastPicker) {
+    pickerTrigger(lastPicker)?.focus({ preventScroll: true });
   }
 }
 
@@ -92,7 +92,9 @@ export function ensureChatComposerPickerDismissal(): void {
   }
   composerPickerDismissalInstalled = true;
   document.addEventListener("pointerdown", dismissChatComposerPickersOutside, true);
-  document.addEventListener("keydown", dismissChatComposerPickersOnEscape, true);
+  // Window capture observes the open picker before component Escape handlers
+  // mutate details.open and erase the return-focus owner.
+  window.addEventListener("keydown", dismissChatComposerPickersOnEscape, true);
   document.addEventListener(
     "keydown",
     (event) => {
