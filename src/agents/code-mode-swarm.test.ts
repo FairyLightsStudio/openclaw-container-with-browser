@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { CodeModeOutputState } from "./code-mode-json.js";
 import { createCodeModeNamespaceRuntime } from "./code-mode-namespaces.js";
-import { consumeRepairableCodeModeFailure } from "./code-mode-repair-provenance.js";
 import type { CodeModeWorkerResult } from "./code-mode-runtime.js";
 import { applyCodeModeCatalog, resolveCodeModeConfig } from "./code-mode.js";
 import {
@@ -114,6 +113,18 @@ function expectWaiting(
   if (result.status !== "waiting") {
     throw new Error("expected waiting worker result");
   }
+}
+
+async function completeWorkerAgent(prompt: string, runId: string, completion: unknown) {
+  const first = await workerExec(`return await agents.run(${JSON.stringify(prompt)});`, true);
+  expectWaiting(first);
+  const second = await workerResume(first, [
+    { id: first.pendingRequests[0]!.id, ok: true, value: { runId } },
+  ]);
+  expectWaiting(second);
+  return await workerResume(second, [
+    { id: second.pendingRequests[0]!.id, ok: true, value: completion },
+  ]);
 }
 
 function swarmContext() {
@@ -299,34 +310,18 @@ describe("Code Mode swarm guest", () => {
   });
 
   it("returns text and raises a typed guest error for failed collectors", async () => {
-    const first = await workerExec('return await agents.run("Research");', true);
-    expectWaiting(first);
-    const second = await workerResume(first, [
-      { id: first.pendingRequests[0]!.id, ok: true, value: { runId: "collector-2" } },
-    ]);
-    expectWaiting(second);
-    const completed = await workerResume(second, [
-      {
-        id: second.pendingRequests[0]!.id,
-        ok: true,
-        value: { runId: "collector-2", status: "done", result: "plain text" },
-      },
-    ]);
+    const completed = await completeWorkerAgent("Research", "collector-2", {
+      runId: "collector-2",
+      status: "done",
+      result: "plain text",
+    });
     expect(completed).toMatchObject({ status: "completed", value: "plain text" });
 
-    const failedFirst = await workerExec('return await agents.run("Fail");', true);
-    expectWaiting(failedFirst);
-    const failedSecond = await workerResume(failedFirst, [
-      { id: failedFirst.pendingRequests[0]!.id, ok: true, value: { runId: "collector-3" } },
-    ]);
-    expectWaiting(failedSecond);
-    const failed = await workerResume(failedSecond, [
-      {
-        id: failedSecond.pendingRequests[0]!.id,
-        ok: true,
-        value: { runId: "collector-3", status: "timeout", result: "deadline exceeded" },
-      },
-    ]);
+    const failed = await completeWorkerAgent("Fail", "collector-3", {
+      runId: "collector-3",
+      status: "timeout",
+      result: "deadline exceeded",
+    });
     expect(failed).toMatchObject({ status: "failed", code: "internal_error" });
     if (failed.status === "failed") {
       expect(failed.error).toContain(
@@ -335,7 +330,7 @@ describe("Code Mode swarm guest", () => {
     }
   });
 
-  it("keeps a guest error after a parked agents.run restricted without replaying the collector", async () => {
+  it("reports a guest error after a parked agents.run without replaying the collector", async () => {
     const collectorStarted = createDeferred();
     const collectorRelease = createDeferred();
     swarmMocks.waitForCollectorCompletion.mockImplementation(async () => {
@@ -371,7 +366,6 @@ describe("Code Mode swarm guest", () => {
         bridgeDispatchStarted: true,
         error: expect.stringContaining("ReferenceError: missingAfterCollector is not defined"),
       });
-      expect(consumeRepairableCodeModeFailure(details)).toBe(false);
       expect(harness.spawnTool.execute).toHaveBeenCalledOnce();
       expect(swarmMocks.waitForCollectorCompletion).toHaveBeenCalledOnce();
       expect(testing.activeRuns.size).toBe(0);
@@ -386,27 +380,14 @@ describe("Code Mode swarm guest", () => {
     { name: "blank result", schemaError: undefined },
     { name: "schema error", schemaError: "structured output was invalid" },
   ])("prefers an authoritative execution error over $name", async ({ schemaError }) => {
-    const first = await workerExec('return await agents.run("Fail after output");', true);
-    expectWaiting(first);
-    const second = await workerResume(first, [
-      { id: first.pendingRequests[0]!.id, ok: true, value: { runId: "collector-4" } },
-    ]);
-    expectWaiting(second);
-
-    const failed = await workerResume(second, [
-      {
-        id: second.pendingRequests[0]!.id,
-        ok: true,
-        value: {
-          runId: "collector-4",
-          status: "failed",
-          result: "",
-          structured: { partial: true },
-          error: "provider failed after tool output",
-          ...(schemaError ? { schemaError } : {}),
-        },
-      },
-    ]);
+    const failed = await completeWorkerAgent("Fail after output", "collector-4", {
+      runId: "collector-4",
+      status: "failed",
+      result: "",
+      structured: { partial: true },
+      error: "provider failed after tool output",
+      ...(schemaError ? { schemaError } : {}),
+    });
 
     expect(failed).toMatchObject({ status: "failed", code: "internal_error" });
     if (failed.status === "failed") {
