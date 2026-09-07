@@ -52,7 +52,11 @@ import {
 import { maybeRepairLegacyConfigForUpdateChannel } from "./update-command-config.js";
 import { printUpdateDryRun } from "./update-command-dry-run.js";
 import { withOwnedManagedUpdateEnv } from "./update-command-managed-context.js";
-import { reportPreMutationUpdateFailure, UpdateCommandFailure } from "./update-command-result.js";
+import {
+  mergeWindowsTaskRecoveryFailure,
+  reportPreMutationUpdateFailure,
+  UpdateCommandFailure,
+} from "./update-command-result.js";
 import {
   admitUpdateCommandRun,
   completeUpdateCommandRun,
@@ -122,31 +126,19 @@ export async function updateCommand(inputOpts: UpdateCommandOptions): Promise<vo
           }
           try {
             await recoveryState.windowsTaskAutoStartRecovery?.restore();
-          } catch (error) {
-            if (failure?.error instanceof UpdateCommandFailure) {
-              // A rejected restore promise can be observed again during unwinding.
-              // Keep the reported failure and never turn cleanup into safe-exit 80.
-              failure = {
-                error: new UpdateCommandFailure(
-                  { ...failure.error.result, status: "error" },
-                  1,
-                  `${failure.error.message}; Windows autostart recovery: ${formatErrorMessage(error)}`,
-                  { cause: error },
-                ),
-              };
-            } else {
-              failure = {
-                error: failure
-                  ? new AggregateError(
-                      [failure.error, error],
-                      `Update failed (${formatErrorMessage(failure.error)}) and Windows autostart recovery failed (${formatErrorMessage(error)})`,
-                      { cause: failure.error },
-                    )
-                  : error,
-              };
-            }
-          } finally {
             await recoveryState.windowsTaskAutoStartRecovery?.complete();
+          } catch (restoreError) {
+            let error = restoreError;
+            try {
+              await recoveryState.windowsTaskAutoStartRecovery?.complete(false);
+            } catch (compensationError) {
+              error = new AggregateError(
+                [error, compensationError],
+                `Windows task autostart recovery failed: ${formatErrorMessage(error)}; ${formatErrorMessage(compensationError)}`,
+                { cause: error },
+              );
+            }
+            failure = mergeWindowsTaskRecoveryFailure(failure, error);
           }
           if (failure) {
             if (!recoveryState.ledgerHandoffOwned) {
@@ -277,7 +269,6 @@ async function updateCommandInternal(
   let fallbackToLatest = false;
   let packageInstallSpec: string | null = null;
   let packageInstallEnv: NodeJS.ProcessEnv | undefined;
-  let packageInstallCwd: string | undefined;
   let packageInstallTarget: ResolvedGlobalInstallTarget | undefined;
   let installedPackageName = DEFAULT_PACKAGE_NAME;
   let packageAlreadyCurrent = false;
@@ -336,7 +327,6 @@ async function updateCommandInternal(
     recoveryState.triageTarget.root = root;
     recoveryState.triageTarget.nodeRunner = packageUpdateNodeRunner;
     packageInstallEnv = await createGlobalInstallEnv();
-    packageInstallCwd = invocationCwd;
     if (updateInstallKind === "package") {
       installedPackageName = (await readPackageName(root)) ?? DEFAULT_PACKAGE_NAME;
       const manager = await resolveGlobalManager({
@@ -384,7 +374,7 @@ async function updateCommandInternal(
       targetVersion = await resolveTargetVersion(tag, timeoutMs, {
         spec: explicitSpec,
         command: npmMetadataCommand,
-        cwd: packageInstallCwd,
+        cwd: invocationCwd,
         env: packageInstallEnv,
       });
     } else {
@@ -392,7 +382,7 @@ async function updateCommandInternal(
         channel,
         timeoutMs,
         command: npmMetadataCommand,
-        cwd: packageInstallCwd,
+        cwd: invocationCwd,
         env: packageInstallEnv,
       }).then((resolved) => {
         tag = resolved.tag;
@@ -428,7 +418,7 @@ async function updateCommandInternal(
         }),
         command: npmMetadataCommand,
         timeoutMs,
-        cwd: packageInstallCwd,
+        cwd: invocationCwd,
         env: packageInstallEnv,
       });
       if (targetMetadata.error || targetMetadata.version !== targetVersion) {
@@ -482,6 +472,7 @@ async function updateCommandInternal(
     channel,
     devTarget,
     packageTargetSchemaVersions,
+    packageTargetVersion: targetVersion ?? undefined,
     opts,
     refuseUpdate,
   });
@@ -522,13 +513,14 @@ async function updateCommandInternal(
 
   if (packageAlreadyCurrent) {
     const { finishAlreadyCurrentUpdate } = await import("./update-execution.runtime.js");
+    const channelChanged = requestedChannel !== null && requestedChannel !== storedChannel;
     await finishAlreadyCurrentUpdate({
       opts,
       result: {
-        status: "skipped",
+        status: channelChanged ? "ok" : "skipped",
         mode: packageInstallTarget?.manager ?? "unknown",
         root,
-        reason: "already-current",
+        ...(channelChanged ? {} : { reason: "already-current" }),
         before: { version: currentVersion },
         after: { version: currentVersion },
         steps: [],
@@ -661,6 +653,7 @@ async function updateCommandInternal(
     packageInstallEnv,
     packageInstallTarget,
     packageTargetSchemaVersions,
+    packageTargetVersion: targetVersion ?? undefined,
     packageUpdateNodeRunner,
     managedServiceNodeRunner,
     managedServiceRootRedirect,
@@ -687,10 +680,10 @@ async function updateCommandInternal(
   recoveryState.triageTarget.env =
     recoveryEnv ?? ownedManagedUpdateContext?.env ?? recoveryState.triageTarget.env;
   const finalizationConfigSnapshot = ownedManagedUpdateContext?.configSnapshot ?? configSnapshot;
-  const finalizationPluginInstallRecords =
-    ownedManagedUpdateContext?.pluginInstallRecords ?? preUpdatePluginInstallRecords;
   stop();
   const finalization = {
+    mutationStarted: execution.mutationStarted,
+    expectedVersion: targetVersion ?? undefined,
     result,
     failure: execution.failure,
     root,
@@ -706,13 +699,16 @@ async function updateCommandInternal(
     preManagedServiceStop,
     ownedManagedUpdateEnv: ownedManagedUpdateContext?.env,
     controlPlaneUpdateSentinelMeta,
-    preUpdatePluginInstallRecords: finalizationPluginInstallRecords,
+    preUpdatePluginInstallRecords:
+      ownedManagedUpdateContext?.pluginInstallRecords ?? preUpdatePluginInstallRecords,
     startedAt,
     packageUpdateNodeRunner,
     updateStepTimeoutMs,
     invocationCwd,
     packageTransaction: execution.packageTransaction,
     schemaVersions: execution.schemaVersions,
+    candidateSchemaVersions: execution.candidateSchemaVersions,
+    previousSchemaVersions: execution.previousSchemaVersions,
     previousVerified: execution.previousVerified,
   };
   const rollbackBlockedReason = await inspectActivatedUpdateState({
@@ -733,7 +729,9 @@ async function updateCommandInternal(
       progress.pendingSteps,
     );
     if (continued.exitCode !== 0) {
-      throw new UpdateCommandFailure(continued.result, continued.exitCode);
+      throw new UpdateCommandFailure(continued.result, continued.exitCode, undefined, {
+        automaticTriage: continued.automaticTriage,
+      });
     }
     return;
   }

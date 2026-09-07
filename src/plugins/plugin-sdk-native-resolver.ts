@@ -82,6 +82,7 @@ const INTERNAL_CORE_PACKAGE_ALIASES = [
       ["types", "types.ts"],
       ["validation", "validation.ts"],
       ["internal/anthropic", path.join("internal", "anthropic.ts")],
+      ["internal/google-model-family", path.join("internal", "google-model-family.ts")],
       ["internal/openai", path.join("internal", "openai.ts")],
       [
         "internal/openai-responses-payload-policy",
@@ -90,6 +91,7 @@ const INTERNAL_CORE_PACKAGE_ALIASES = [
       ["internal/retry-after", path.join("internal", "retry-after.ts")],
       ["internal/runtime", path.join("internal", "runtime.ts")],
       ["internal/shared", path.join("internal", "shared.ts")],
+      ["internal/tool-schema", path.join("internal", "tool-schema.ts")],
     ],
   },
   {
@@ -105,7 +107,6 @@ const INTERNAL_CORE_PACKAGE_ALIASES = [
   },
 ] as const;
 let installed = false;
-let previousResolveFilename: ResolveFilename | undefined;
 
 function resolveLoaderModulePath(options: InstallOpenClawPluginSdkNativeResolverOptions): string {
   return options.modulePath ?? fileURLToPath(options.moduleUrl ?? import.meta.url);
@@ -349,17 +350,15 @@ function listInternalCorePackageNativeAliases(
 }
 
 function installResolver(): void {
-  if (installed || !moduleWithResolver[nodeResolveFilenameProperty]) {
+  const native = getPluginCache().sdk.native;
+  const previousResolveFilename = moduleWithResolver[nodeResolveFilenameProperty];
+  // Packaged runtimes without aliases must retain the runtime's native resolution path.
+  if (installed || !previousResolveFilename || !(native.aliases.size || native.sdkProviders.size)) {
     return;
   }
-  previousResolveFilename = moduleWithResolver[nodeResolveFilenameProperty];
-  moduleWithResolver[nodeResolveFilenameProperty] = ((request, parent, isMain, options) => {
-    const aliasTarget = resolveAliasTargetForParent(request, parent);
-    if (aliasTarget) {
-      return aliasTarget;
-    }
-    return previousResolveFilename?.(request, parent, isMain, options) ?? request;
-  }) satisfies ResolveFilename;
+  moduleWithResolver[nodeResolveFilenameProperty] = ((request, parent, isMain, options) =>
+    resolveAliasTargetForParent(request, parent) ??
+    previousResolveFilename(request, parent, isMain, options)) satisfies ResolveFilename;
   moduleWithResolver.registerHooks?.({
     resolve(specifier, context, nextResolve) {
       const aliasTarget = resolveAliasTargetForParentUrl(specifier, context.parentURL);
