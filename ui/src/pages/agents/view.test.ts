@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { flattenTranslations } from "../../../../scripts/lib/control-ui-i18n-sync-plan.ts";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ChannelAccountSnapshot, CronJob } from "../../api/types.ts";
+import type { MultiSelect } from "../../components/multi-select.ts";
 import { i18n, t } from "../../i18n/index.ts";
 import { zh_CN } from "../../i18n/locales/zh-CN.ts";
 import { createInitialCronState, loadCronJobsPage } from "../../lib/cron/index.ts";
@@ -426,10 +427,8 @@ describe("renderAgents", () => {
       container,
     );
 
-    expect(container.querySelectorAll(".agent-chip-input .chip")).toHaveLength(0);
-    expect(container.querySelector<HTMLInputElement>(".agent-chip-input input")?.placeholder).toBe(
-      "provider/model",
-    );
+    const field = container.querySelector<MultiSelect>("openclaw-multi-select.agent-fallbacks");
+    expect(field?.value).toEqual([]);
   });
 
   it("remounts overview model controls when switching selected agents", async () => {
@@ -1023,6 +1022,7 @@ describe("renderAgentFiles", () => {
     ]);
     expect(previewExpandButton.getAttribute("aria-pressed")).toBe("true");
     expect(previewExpandButton.getAttribute("aria-label")).toBe("Collapse preview");
+    expect(previewExpandButton.closest("openclaw-tooltip")?.content).toBe("Collapse preview");
 
     container.querySelector<HTMLButtonElement>('[aria-label="Close preview"]')?.click();
 
@@ -1035,5 +1035,6 @@ describe("renderAgentFiles", () => {
     ]);
     expect(previewExpandButton.getAttribute("aria-pressed")).toBe("false");
     expect(previewExpandButton.getAttribute("aria-label")).toBe("Expand preview");
+    expect(previewExpandButton.closest("openclaw-tooltip")?.content).toBe("Expand preview");
   });
 });
