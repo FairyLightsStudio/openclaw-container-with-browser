@@ -17,12 +17,14 @@ import {
 } from "../../scripts/lib/tsdown-config-groups.mts";
 import { WORKER_DEPLOY_OPTIONAL_NATIVE_MODULE_ID } from "../../scripts/lib/worker-deploy-build-plugin.mts";
 import { importFreshModule } from "../../src/plugin-sdk/test-helpers/import-fresh.js";
+import { resolveTestNodeExecPath } from "../../src/test-utils/node-process.js";
 import buildConfigs from "../../tsdown.config.ts";
 import { copyFsSafePackageFixture } from "./fs-safe-package.test-support.js";
 import { createScriptTestHarness } from "./test-helpers.js";
 
 const configs = Array.isArray(buildConfigs) ? buildConfigs : [buildConfigs];
 const { createTempDir } = createScriptTestHarness();
+const testNodeExecPath = resolveTestNodeExecPath();
 afterEach(() => vi.unstubAllEnvs());
 
 type TsdownConfig = (typeof configs)[number];
@@ -142,7 +144,7 @@ describe("tsdown config", () => {
           'export { value } from "setup-private-dependency";',
         ].join("\n"),
       );
-      const bundles = await build({
+      const { bundles } = await build({
         ...selected,
         config: false,
         cwd: root,
@@ -176,7 +178,7 @@ describe("tsdown config", () => {
       `;
         const result = await new Promise<{ error: Error | null; stderr: string }>((resolve) => {
           execFile(
-            process.execPath,
+            testNodeExecPath,
             ["--input-type=module", "-e", script],
             { cwd: root, timeout: 30_000 },
             (error, _stdout, stderr) => resolve({ error, stderr }),
@@ -228,7 +230,7 @@ describe("tsdown config", () => {
         fs.mkdirSync(path.dirname(destination), { recursive: true });
         fs.symlinkSync(fs.realpathSync(installed), destination, "dir");
       }
-      const bundles = await build({
+      const { bundles } = await build({
         ...selected,
         config: false,
         entry: { [entryName]: source! },
@@ -273,7 +275,7 @@ describe("tsdown config", () => {
         const result = await new Promise<{ error: Error | null; stdout: string; stderr: string }>(
           (resolve) => {
             execFile(
-              process.execPath,
+              testNodeExecPath,
               [
                 "--input-type=module",
                 "-e",
@@ -306,7 +308,7 @@ describe("tsdown config", () => {
     expect(Object.keys(entries)).toContain("discord");
     const root = fs.realpathSync(createTempDir("openclaw-retained-config-doctors-"));
     fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ type: "module" }));
-    const bundles = await build({
+    const { bundles } = await build({
       ...selected,
       config: false,
       outDir: root,
@@ -407,7 +409,7 @@ describe("tsdown config", () => {
       const result = await new Promise<{ error: Error | null; stdout: string; stderr: string }>(
         (resolve) => {
           execFile(
-            process.execPath,
+            testNodeExecPath,
             ["--input-type=module", "-e", script, root, JSON.stringify(Object.keys(entries))],
             { cwd: root, timeout: 30_000 },
             (error, stdout, stderr) => resolve({ error, stdout, stderr }),
@@ -463,7 +465,7 @@ describe("tsdown config", () => {
         worker ? isWorkerDeployConfig : (config) => config.name === TSDOWN_UNIFIED_CONFIG_GROUP,
       );
       expect(selected).toBeDefined();
-      const bundles = await build({
+      const { bundles } = await build({
         ...selected,
         config: false,
         entry: worker
@@ -491,7 +493,7 @@ describe("tsdown config", () => {
           const result = await new Promise<{ error: Error | null; stdout: string; stderr: string }>(
             (resolve) => {
               execFile(
-                process.execPath,
+                testNodeExecPath,
                 [
                   "--input-type=module",
                   "--eval",
@@ -670,7 +672,7 @@ describe("tsdown config", () => {
           )
           .join("\n"),
       );
-      const bundles = await build({
+      const { bundles } = await build({
         ...selected,
         config: false,
         cwd: root,
