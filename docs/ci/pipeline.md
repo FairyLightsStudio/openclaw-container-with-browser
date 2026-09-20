@@ -80,6 +80,12 @@ Page deletions and renames preserve this targeting. Explicit Node owners for
 Markdown inputs remain selected; workspace templates under
 `docs/reference/templates/` and unowned source inputs retain the full fallback.
 
+When `docker-seed-e2e` selects the published upgrade survivor, it uploads
+`docker-seed-upgrade-survivor-proof` even after a failure. The artifact contains
+scheduler summaries and sanitized survivor reports. Failed reports include
+bounded, redacted baseline and candidate agent-turn output; private scenario
+state and raw logs remain outside the upload.
+
 Full canonical `main` pushes run the operator config and prior-release state
 startup corpora once through the Node `runtime-config` owner. Canonical pull
 requests also omit the duplicate **Check startup corpus** step when preflight
@@ -156,8 +162,14 @@ It publishes a commit status named `openclaw/ci-gate` that requires both the
 applicable approvals and a successful native CI gate from the latest CI run for
 the current PR head. The existing CI job retains its check with the same name.
 GitHub requires both the check and the commit status when both share a required
-context. Missing approval or incomplete CI fails the review status; CI completion
+context. Missing approval, failed CI, or evaluation errors fail the review status.
+Missing or running CI leaves it pending and keeps merging blocked. CI completion
 automatically evaluates it again. Approval comments do not rerun the test suite.
+The Security Review Actions job succeeds when evaluation completes, including
+when the required commit status blocks merging for missing approval or failed CI.
+This prevents an earlier evaluation from leaving a stale failed job after automatic
+reevaluation clears the status. Evaluation errors still fail the job and keep the
+required status closed.
 
 The **Security Sensitive Guard** publishes `openclaw/security-sensitive-review`.
 Its inventory in `.github/security-review-policy.yml` covers Gateway
