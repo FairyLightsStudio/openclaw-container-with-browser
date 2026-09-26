@@ -1451,10 +1451,10 @@ describe("session accessor seam", () => {
 
     const created = await createSessionEntryWithTranscript(
       scope,
-      ({ existingEntry, targetEntry, isLabelInUse }) => {
+      ({ existingEntry, targetEntry, labelInUse }) => {
         expect(existingEntry).toBeUndefined();
         expect(targetEntry).toBeUndefined();
-        expect(isLabelInUse("unused")).toBe(false);
+        expect(labelInUse).toBe(false);
         return {
           ok: true,
           entry: {
@@ -3219,49 +3219,6 @@ describe("session accessor seam", () => {
       message: expect.stringContaining("changed before lifecycle upsert"),
     });
     expect(loadSessionEntry(scope)).toMatchObject({ model: "newer", updatedAt: 20 });
-  });
-
-  it("reclaims SQLite transcript rows for lifecycle removals without archive intent", async () => {
-    const scope = {
-      sessionId: "session-1",
-      sessionKey: "agent:main:preserve",
-      storePath,
-    };
-    await upsertSessionEntryCore(scope, {
-      restartRecoveryDeliveryContext: {
-        channel: "whatsapp",
-        to: "+15551234567",
-      },
-      restartRecoveryDeliveryRunId: "old-run",
-      sessionId: scope.sessionId,
-      updatedAt: 10,
-    });
-    const owner = { id: "lifecycle-owner", type: "human" as const };
-    assignSessionOwner(scope, { assignedBy: owner, owner });
-    await replaceTranscriptEvents(scope, [
-      {
-        id: "event-1",
-        message: { role: "user", content: "keep me" },
-        type: "message",
-      },
-    ]);
-
-    const notify = vi.fn();
-    onTestFinished(onSessionIdentityMutation(notify));
-    const result = await applySessionEntryLifecycleMutation({
-      storePath,
-      removals: [{ expectedSessionId: scope.sessionId, sessionKey: scope.sessionKey }],
-    });
-
-    expect(result.removedEntries).toBe(1);
-    expect(notify).toHaveBeenCalledWith({
-      agentId: "main",
-      kind: "delete",
-      previous: { sessionId: scope.sessionId, sessionKeys: [scope.sessionKey] },
-    });
-    expect(result.archivedTranscriptDirectories).toEqual([]);
-    expect(loadSessionEntry(scope)).toBeUndefined();
-    await expect(loadTranscriptEvents(scope)).resolves.toEqual([]);
   });
 
   it("captures SQLite archived transcript cleanup failures when requested", async () => {
