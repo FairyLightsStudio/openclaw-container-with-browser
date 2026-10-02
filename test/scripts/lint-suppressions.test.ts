@@ -239,7 +239,7 @@ describe("production lint suppressions", () => {
         "src/node-host/invoke-payload.ts|typescript/no-unnecessary-type-parameters|1",
         "src/node-host/mcp.ts|unicorn/prefer-add-event-listener|1",
         "src/plugin-sdk/channel-config-helpers.ts|typescript/no-unnecessary-type-parameters|1",
-        "src/plugin-sdk/channel-entry-contract.ts|typescript/no-unnecessary-type-parameters|2",
+        "src/plugin-sdk/channel-entry-contract.ts|typescript/no-unnecessary-type-parameters|1",
         "src/plugin-sdk/facade-loader.ts|typescript/no-unnecessary-type-parameters|1",
         "src/plugin-sdk/facade-runtime.ts|typescript/no-unnecessary-type-parameters|3",
         "src/plugin-sdk/json-store.ts|typescript-eslint/no-unnecessary-type-parameters|1",
@@ -260,6 +260,8 @@ describe("production lint suppressions", () => {
         "src/secrets/private-plan-file.ts|preserve-caught-error|1",
         "src/state/config-machine-state.ts|typescript/no-unnecessary-type-parameters|2",
         "src/state/openclaw-agent-db-admission.ts|typescript/prefer-promise-reject-errors|1",
+        // Node worker BroadcastChannel.postMessage accepts only a message, not a browser targetOrigin.
+        "src/state/openclaw-agent-worker-store.test-support.ts|unicorn/require-post-message-target-origin|1",
         "src/system-agent/setup-inference-activate.ts|preserve-caught-error|1",
         "src/test-utils/vitest-mock-fn.ts|typescript/no-explicit-any|1",
         "src/utils.ts|typescript/no-unnecessary-type-parameters|1",
