@@ -16,7 +16,9 @@ export function captureCommand(command: OpenClawStateReadCommand): OpenClawState
     command.type === "sessionState.events" ||
     command.type === "operatorApprovals.history" ||
     command.type === "diagnostic.latest" ||
+    command.type === "diagnostic.configAuditFacts" ||
     command.type === "operatorApprovals.listCronGrants" ||
+    command.type === "operatorApprovals.validateCronGrant" ||
     command.type === "acpSessions.metadata" ||
     command.type === "githubPublication.knownPullRequestUrls" ||
     command.type === "githubRepository.knownPullRequestUrls" ||
@@ -226,7 +228,7 @@ function commandBytes(command: OpenClawStateReadRequest["command"]): number {
   if (command.type === "generatedHtmlProvenance.read") {
     return bytes + Buffer.byteLength(command.input, "utf8");
   }
-  if (command.type === "diagnostic.latest") {
+  if (command.type === "diagnostic.latest" || command.type === "diagnostic.configAuditFacts") {
     return bytes + Buffer.byteLength(command.input.scope, "utf8") + 16;
   }
   if (command.type === "cron.activeReceiptOwners") {
@@ -366,6 +368,9 @@ function commandBytes(command: OpenClawStateReadRequest["command"]): number {
       Buffer.byteLength(command.input.kind ?? "", "utf8") +
       16
     );
+  }
+  if (command.type === "operatorApprovals.validateCronGrant") {
+    return bytes + Buffer.byteLength(JSON.stringify(command.input), "utf8");
   }
   if (command.type === "operatorApprovals.listCronGrants") {
     return bytes + 8;
