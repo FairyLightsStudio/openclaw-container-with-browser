@@ -53,8 +53,8 @@ does not depend on the browser returning.
 When an update replaces the bundled Control UI, an open tab reloads after the
 Gateway reports the new build. Automatic recovery for that reported build and
 manual reloads share a bounded document-readiness check, so a transient failed
-probe does not immediately strand the tab. Generic lazy-chunk failures make one
-automatic probe and leave further recovery to the visible retry action. The
+check does not immediately strand the tab. Generic lazy-chunk failures make one
+automatic check and leave further recovery to the visible retry action. The
 browser still limits automatic navigation to one reload per target build. If the
 Gateway remains unavailable, use the visible reload action once it is reachable.
 
@@ -255,7 +255,11 @@ joins final chat persistence, drains Memory's database borrows, and closes agent
 databases before exiting. It skips plugin and channel teardown that could retain
 the process until the deadline. Database admission stays fenced through lock
 release and log flushing, which have a final five-second exit window. Shutdown
-logs report the elapsed time for these steps. The supervisor deadline remains
+logs report each cleanup step that takes at least one second, including its name
+and elapsed milliseconds. Deadline exits list the currently pending cleanup steps
+and how long each has been waiting (up to eight, with a count of any others).
+These diagnostics are always enabled; `OPENCLAW_GATEWAY_RESTART_TRACE=1` adds
+begin/end timing for fast steps too. The supervisor deadline remains
 the hard upper bound. Clean database restart proof is published only after writer
 leases, checkpointing, and native connection closure settle; one database's idle
 receipt alone does not authorize process exit.
@@ -378,7 +382,7 @@ when it is very short). For example, a 5-second job nominally leaves 1.875
 seconds each for drain and cleanup after its 1.25-second exit margin; a
 15-second job leaves 5 seconds of drain, 6.25 seconds for cleanup, and a
 3.75-second margin. **This reduces cleanup time for custom jobs below 20
-seconds.** The default systemd 90-second deadline is unaffected. The probe can
+seconds.** The default systemd 90-second deadline is unaffected. The check can
 consume up to three 2-second calls; a very slow inspection can leave no drain.
 
 If a Node-recovery or compile-cache launcher is the job's PID, its own child
@@ -468,11 +472,11 @@ restart and verification. Unchanged plugins do not run another full Doctor pass.
 
 After activation, the updater verifies that the managed service is running and
 owns its port, the Gateway hello handshake matches the expected version/build
-identity, a 12-probe health settle passes, plugins and channels are healthy, and
+identity, a 12-check health settle passes, plugins and channels are healthy, and
 `/readyz` returns HTTP 200. Update verification does not use model inference.
 Startup receives the update's existing per-step `--timeout` budget (1800 seconds
 by default), including migration and listener initialization, followed by the
-12-probe settle window. On the first update from an older release, the old updater
+12-check settle window. On the first update from an older release, the old updater
 invokes the newly installed CLI but does not pass that readiness budget. The
 candidate recognizes the existing update marker and, once the managed process is
 running, uses the five-minute startup watchdog instead of the standalone
@@ -558,7 +562,7 @@ generation across unchanged configuration and schemas and supplies a verified
 recovery decision, the helper starts and verifies it instead of leaving it
 stopped. Helper recovery verifies service liveness, version/build identity,
 plugin activation, and channel health. It does not repeat the separate `/readyz`
-probe. That report field remains unverified.
+check. That report field remains unverified.
 The run then finishes `rolled-back` with the previous version and measured
 downtime. Missing recovery proof, migrated state, or failed restoration still
 requires repair before restart. A service that is observed stopped is recorded
@@ -623,6 +627,10 @@ Three complementary mechanisms mark sessions whose turn did not finish:
 Agents still undergoing database startup inspection retain their recovery work.
 When admission finishes, the same startup recovery owner scans their stores with
 the original cutoff, so newly admitted turns are not mistaken for crash orphans.
+Inbound channel turns, including unacknowledged messages replayed after a crash,
+wait for their agent's writable admission before recording session metadata or
+dispatching. Other agents remain available, and stopping the channel or Gateway
+cancels the wait.
 
 A failed store scan leaves that store eligible for the scheduled retry while
 other stores continue recovery. `openclaw status` and `openclaw doctor` show
@@ -657,6 +665,12 @@ interrupted by a restart and to continue from the existing transcript. If a
 final reply had already been produced but not delivered, its text is included
 so the agent can deliver it instead of redoing the work.
 
+Startup recovery prepares and admits one continuation at a time to bound database
+and worker pressure. Once execution starts, the normal main lane owns concurrency;
+a long recovered turn does not hold a separate startup slot. Deferred database
+admissions join the same startup scheduler. Shutdown stops new preparation and
+joins the current pass, leaving unstarted interruptions available for the next boot.
+
 The restart does not cancel the user's task. The agent checks the current state,
 reconciles tool results whose outcomes are unknown, and continues without asking
 the user to repeat the request. Preparing a new message cannot consume the
@@ -671,9 +685,11 @@ automatically without surviving authority. Missing or invalid provenance does no
 establish a human sender for an internal claim. Legacy channel and Control UI
 turns retain their existing recovery checks. Child-completion follow-ups still use
 their existing recovery and delivery ownership checks. If their agent database is
-still undergoing startup inspection or preparation, the pending completion wake
-retries after 30 seconds without consuming delivery attempts or changing its
-replay identity. The retained wake survives another restart. A confirmed
+still undergoing startup inspection or preparation, a child result changes while
+being read, or a preparation worker refuses work at capacity, the pending completion
+wake retries after 30 seconds without consuming delivery attempts or changing its
+batch, replay identity, or retry counters. Each retry reads fresh results under
+the same ownership checks. The retained wake survives another restart. A confirmed
 inspection failure or ownership mismatch remains a failure, not permission to
 bypass database admission; cancellation still retires the wake.
 
@@ -850,6 +866,8 @@ follow-up is waiting to retry or is interrupted by restart, the saved
 obligation survives and resumes after startup. Restart admission rejection
 does not consume an attempt, and cancellation of an admitted attempt does
 not exhaust the obligation. Existing delivery retry limits still apply.
+Transient cleanup preparation failures keep required final delivery scheduled
+within its existing delivery window. Incidental cleanup retains its bounded retry limit.
 Settling a yielded turn's wake leaves its unfinished native run and final delivery
 intact. Completed cancellation keeps its wake and cleanup bookkeeping in the
 native subagent record; it does not require a separate Tasks row.
@@ -951,9 +969,11 @@ channels.start --params '{"channel":"<id>"}'`
   `openclaw_session_recovery_age_seconds`.
 - **Logs:** recovery decisions are logged under the
   `main-session-restart-recovery` and `agents/subagent-registry`
-  subsystems. A startup scan that finds interrupted candidates but starts none
-  still logs one summary, including bounded skip counts by reason such as
-  `live_owner`, `work_start_blocked`, or `dispatch_target_unavailable`.
+  subsystems. Every startup pass includes bounded skip counts by reason such as
+  `live_owner`, `work_start_blocked`, or `dispatch_target_unavailable`, even when
+  other sessions started. Each interrupted main candidate has a structured
+  decision line with boot/pass, session and source-run identity, outcome
+  (`started`, `settled`, `deferred`, or `blocked`), and the next responsible owner.
 - **Reply hooks:** resumed turns run currently loaded `before_agent_reply`
   hooks under the normal user-trigger rules. Automatically delivered replies
   also run the normal `reply_payload_sending` hook before channel delivery,
