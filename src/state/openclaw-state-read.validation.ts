@@ -243,7 +243,8 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
         typeof input.command.input.publicKey === "string" &&
         typeof input.command.input.nowMs === "number") ||
       input.command.type === "admit" ||
-      input.command.type === "doctor.gatewayOwnerLease.read" ||
+      (input.command.type === "gatewayOwnerLease.read" &&
+        typeof input.command.schemaMaintenance === "boolean") ||
       input.command.type === "subagents.sessionList" ||
       (input.command.type === "subagents.forChildSession" &&
         typeof input.command.childSessionKey === "string") ||
@@ -272,6 +273,7 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
           "list",
           "read",
           "seed",
+          "session",
           "change",
           "pins",
           "profile",
@@ -458,6 +460,8 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
       isTuiLastSessionReadCommand(input.command) ||
       input.command.type === "nodeHost.config" ||
       input.command.type === "tts.prefsPath" ||
+      input.command.type === "voicewake.triggers" ||
+      input.command.type === "voicewake.routing" ||
       input.command.type === "operator.channelPolicy" ||
       input.command.type === "preparedPoolPresence.read" ||
       (input.command.type === "onboardingRecommendations.read" &&
