@@ -330,6 +330,12 @@ async function stagePreparedPendingInput(
       return undefined;
     }
     const { existing, previous, committed } = snapshot;
+    const recovery =
+      (existing && existing.lifecycle_generation !== lifecycleGeneration) ||
+      (committed && !previous) ||
+      previous?.outcome.stopReason === "restart"
+        ? { interruptedByRestart: true as const }
+        : {};
     const replayRequest = resolvePendingInputReplayRequest(preparedRequest, previous ?? existing);
     const { message, stableMessage } = replayRequest;
     let requestHash = replayRequest.requestHash;
@@ -524,6 +530,7 @@ async function stagePreparedPendingInput(
       };
       return {
         state: "queued",
+        ...recovery,
         inputId: committed.messageId,
         message: committed.message,
         run,
@@ -620,7 +627,7 @@ async function stagePreparedPendingInput(
             // COMMIT already accepted this custody. Preserve it before fallible publication.
             registerSessionPendingInputOwner(owner);
             retained = true;
-            options.onCommitted?.(Object.assign(ownerReceipt(owner), completionMethods));
+            options.onCommitted?.(Object.assign(ownerReceipt(owner), completionMethods, recovery));
             assertPrepared(
               facts,
               () => {
@@ -637,7 +644,7 @@ async function stagePreparedPendingInput(
           );
         }
         retained = true;
-        return Object.assign(ownerReceipt(owner), completionMethods);
+        return Object.assign(ownerReceipt(owner), completionMethods, recovery);
       },
       // Committed input now belongs to the receiver; the original source can retire.
       { checkAfter: false },
@@ -676,16 +683,38 @@ export async function prepareSessionPendingInputDedupeRecovery(
 }
 
 /** Read one admitted source for explicit retry comparison; this never authorizes replay. */
+export function readSessionSubmittedInput(
+  scope: PendingInputScope,
+  idempotencyKey: string,
+  options: { includeSource: true },
+): Promise<
+  | { message: PersistedUserTurnMessage; source: "pending" | "transcript"; messageSeq?: number }
+  | undefined
+>;
+export function readSessionSubmittedInput(
+  scope: PendingInputScope,
+  idempotencyKey: string,
+): Promise<PersistedUserTurnMessage | undefined>;
 export async function readSessionSubmittedInput(
   scope: PendingInputScope,
   idempotencyKey: string,
-): Promise<PersistedUserTurnMessage | undefined> {
+  options?: { includeSource: true },
+) {
   const source = await readPendingInputSource(scope, idempotencyKey, false);
   if (!source?.snapshot.current) {
     return undefined;
   }
   source.assertCurrent();
-  const { pending, committed } = source.snapshot;
+  const { pending, committed, committedMessageSeq } = source.snapshot;
   const message = pending ? parseSessionPendingInputMessage(pending.message_json) : committed;
-  return message && readMessageIdempotencyKey(message) === idempotencyKey ? message : undefined;
+  if (!message || readMessageIdempotencyKey(message) !== idempotencyKey) {
+    return undefined;
+  }
+  return options?.includeSource
+    ? {
+        message,
+        source: pending ? ("pending" as const) : ("transcript" as const),
+        ...(committedMessageSeq !== undefined ? { messageSeq: committedMessageSeq } : {}),
+      }
+    : message;
 }
