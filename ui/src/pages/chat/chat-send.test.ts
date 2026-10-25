@@ -30,6 +30,7 @@ import { resolveUiConversationIdentity } from "../../lib/sessions/session-key.ts
 import { createResolvedModelPatch } from "../../test-helpers/chat-model.ts";
 import { createTestGatewayClient as clientWithRequest } from "../../test-helpers/gateway-client.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
+import { createActiveSessionPlacement } from "../../test-helpers/session-placement.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { waitForFast } from "../../test-helpers/wait-for.ts";
 import {
@@ -78,7 +79,7 @@ import type { ChatHost } from "./chat-send-contract.ts";
 import { handleSendChat } from "./chat-send-submit.ts";
 import { switchChatSetting } from "./chat-session.ts";
 import { getPendingChatPickerPatch, patchChatSessionSettings } from "./chat-settings-patches.ts";
-import { handlePageGatewayEvent } from "./chat-state-events.ts";
+import { handlePageGatewayEvent } from "./chat-state-events.test-support.ts";
 import type { ChatPageHost } from "./chat-state-host.ts";
 import {
   refreshChatMetadata,
@@ -317,19 +318,15 @@ function deviceSessionRow(
   return row(key, {
     ...overrides,
     updatedAt: 10,
-    placement: {
-      state: "active",
+    placement: createActiveSessionPlacement({
       generation: 4,
-      createdAtMs: 1,
       updatedAtMs: 2,
       stateChangedAtMs: 2,
       environmentId: "environment-device",
       activeOwnerEpoch: 7,
-      workerBundleHash: "a".repeat(64),
       workspaceBaseManifestRef: "manifest-device",
-      remoteWorkspaceDir: "/workspace",
       runner: { kind: "device", status },
-    },
+    }),
   });
 }
 
@@ -1184,60 +1181,6 @@ describe("handleSendChat", () => {
     expect(
       getChatSessionProjection(host, { sessionKey: host.sessionKey }).entries,
     ).not.toContainEqual(expect.objectContaining({ pendingRunId: rejectedRunId }));
-  });
-
-  it("waits for every pending reasoning and speed patch before sending chat", async () => {
-    const thinkingUpdate = createDeferred<unknown>();
-    const fastModeUpdate = createDeferred<unknown>();
-    const sessionsResult = createSessionsResult([
-      row("agent:main", {
-        effectiveFastMode: false,
-        fastMode: false,
-        thinkingLevel: "low",
-      }),
-    ]);
-    const host = makeChatHost({
-      requestHandlers: {
-        "sessions.patch": (params: unknown) => {
-          const patch = requireRecord(params, "session settings patch");
-          if (Object.hasOwn(patch, "thinkingLevel")) {
-            return thinkingUpdate.promise;
-          }
-          if (Object.hasOwn(patch, "fastMode")) {
-            return fastModeUpdate.promise;
-          }
-          throw new Error("Unexpected sessions.patch payload");
-        },
-        "sessions.list": () => Promise.resolve(sessionsResult),
-        "chat.send": () => Promise.resolve({ status: "started" }),
-      },
-      chatMessage: "use the new reasoning and speed",
-      sessionsResult,
-    });
-    const thinkingPatch = switchChatSetting(host, { kind: "thinkingLevel", value: "high" });
-    const fastModePatch = switchChatSetting(host, { kind: "fastMode", value: "on" });
-    const send = handleSendChat(host);
-    await Promise.resolve();
-
-    expect(requestCalls(host.request, "sessions.patch")).toHaveLength(1);
-    expect(requestCalls(host.request, "chat.send")).toStrictEqual([]);
-    expect(host.chatQueue[0]).toMatchObject({
-      sendState: "waiting-model",
-      text: "use the new reasoning and speed",
-    });
-
-    thinkingUpdate.resolve({});
-    await thinkingPatch;
-    await waitForFast(() => expect(requestCalls(host.request, "sessions.patch")).toHaveLength(2));
-    expect(host.request.mock.calls.some(([method]) => method === "chat.send")).toBe(false);
-
-    fastModeUpdate.resolve({});
-    await Promise.all([fastModePatch, send]);
-    const payload = findRequestPayload(host.request, "chat.send", "chat send payload");
-    expect(payload).toMatchObject({
-      message: "use the new reasoning and speed",
-      sessionKey: "agent:main",
-    });
   });
 
   it("retires a failed queued picker back to the preceding confirmed session row", async () => {

@@ -7,8 +7,7 @@ import {
 } from "@openclaw/gateway-client/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validatePreviousConnectParams } from "../../../packages/gateway-protocol/src/connect-compatibility.test-support.js";
-import { lazyCompile } from "../../../packages/gateway-protocol/src/protocol-validator.js";
-import { ConnectParamsSchema } from "../../../packages/gateway-protocol/src/schema/frames.js";
+import { validateConnectParams } from "../../../packages/gateway-protocol/src/validators/workers.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import {
   loadDeviceAuthToken as loadScopedDeviceAuthToken,
@@ -37,7 +36,6 @@ import {
 import type { GatewayBrowserClientOptions, GatewayHelloOk } from "./gateway.ts";
 
 const realLoadOrCreateDeviceIdentity = nodes.loadOrCreateDeviceIdentity;
-const validateConnectParams = lazyCompile(ConnectParamsSchema);
 const recoveryMigrationRuntimeMock = vi.hoisted(() => ({
   loaded: vi.fn(),
   migrate: vi.fn(),
@@ -310,6 +308,31 @@ describe("GatewayBrowserClient", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  it.each([false, true])(
+    "publishes recovery readiness without loading an empty legacy scope (foreign recovery=%s)",
+    async (foreignRecovery) => {
+      vi.stubGlobal("sessionStorage", createStorageMock());
+      if (foreignRecovery) {
+        seedRecovery("agent:cloud:foreign", "another-principal");
+      }
+      const onRecoveryScopeChange = vi.fn();
+      const client = createClient({ onRecoveryScopeChange });
+      const { ws, connectFrame } = await startConnect(client);
+      emitHello(ws, connectFrame.id, {
+        deviceToken: STORED_CRED,
+        recoveryMigrationAllowed: true,
+        recoveryScope: "server-current",
+      });
+
+      await vi.waitFor(() => expect(onRecoveryScopeChange).toHaveBeenCalledOnce());
+      expect(client.recoveryScopeReady).toBe(true);
+      expect(client.recoveryScope).toBe("server-current");
+      expect(recoveryMigrationRuntimeMock.loaded).not.toHaveBeenCalled();
+      expect(recoveryMigrationRuntimeMock.migrate).not.toHaveBeenCalled();
+      expect(sessionStorage.length).toBe(foreignRecovery ? 1 : 0);
+    },
+  );
 
   it.each([
     { advertised: false, modelCatalog: { agentId: "alpha" } },
