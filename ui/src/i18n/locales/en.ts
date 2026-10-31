@@ -292,6 +292,8 @@ type EnglishCatalog = TranslationMap & {
       | "unsentDraft"
       | "noArchivedSessions"
       | "status"
+      | "all"
+      | "snoozed"
       | "statusLive"
       | "statusIdle"
       | "statusUnknown"
@@ -308,7 +310,6 @@ type EnglishCatalog = TranslationMap & {
       | "approvalsNeedApproval"
       | "attentionMore"
       | "runFailedReason"
-      | "childRunFailedReason"
       | "runErrorTimedOut"
       | "runErrorUnknown"
       | "attentionRequired"
@@ -572,6 +573,7 @@ const startupEnglish = {
     staleTitle: "This view could not load",
     staleSubtitle:
       "Some interface files could not be downloaded. Check your connection, then reload.",
+    bootDraftRecovery: "Copy the draft below before clearing it and reloading.",
     reloading: "Reloading…",
     retry: "Retry",
     stylesFailed: "Styles failed to load, so the page may look broken.",
@@ -734,6 +736,8 @@ const startupEnglish = {
     unsentDraft: "Unsent draft",
     noArchivedSessions: "No archived sessions.",
     status: "Status",
+    all: "All",
+    snoozed: "Snoozed",
     statusLive: "Live",
     statusIdle: "Idle",
     statusUnknown: "Unknown",
@@ -750,7 +754,6 @@ const startupEnglish = {
     approvalsNeedApproval: "{count} requests need approval",
     attentionMore: "+{count} more",
     runFailedReason: "Run failed: {reason}",
-    childRunFailedReason: "Child session {label} failed: {reason}",
     runErrorTimedOut: "Timed out",
     runErrorUnknown: "Unknown error",
     attentionRequired: "Session needs attention",
@@ -758,6 +761,7 @@ const startupEnglish = {
     provider: "Provider",
     lastActive: "Last active {time}",
     activeRun: "Active run",
+    backgroundWorkRunning: "Background work running",
     subagentsWorking: "Subagents working",
     showChildSessions: "Show {count} child sessions for {session}",
     hideChildSessions: "Hide {count} child sessions for {session}",
