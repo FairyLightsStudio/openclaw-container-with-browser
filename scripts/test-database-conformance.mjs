@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import { listDirectoryTreeStrictSync } from "../src/infra/directory-walk.ts";
 import {
   assignPostgresConformanceShards,
@@ -71,12 +71,14 @@ let targets = explicitTargets
         .map((file) => `src/infra/database-engine/${file.replaceAll("\\", "/")}`)
         .toSorted(),
       "src/commands/doctor-database-diagnostics.postgres.test.ts",
+      "src/commands/doctor/auth-alias-migration.postgres.test.ts",
       "src/commands/startup-client-credentials.postgres.test.ts",
       "src/config/sessions/session-accessor.sqlite-lifecycle-artifacts.postgres.test.ts",
       "src/config/sessions/session-accessor.sqlite-read-hold.postgres.test.ts",
       "src/config/sessions/session-turn-resident.postgres.test.ts",
       "src/config/sessions/session-turn-commit.postgres.test.ts",
       "src/infra/client-credential-migration.postgres.test.ts",
+      "src/infra/client-credential-startup.gateway.postgres.test.ts",
       "src/infra/state-migrations.plugin-doctor-context.postgres.test.ts",
       "src/infra/gateway-lock-recovery.postgres.test.ts",
       "src/infra/exec-approvals-native.test.ts",
@@ -124,7 +126,9 @@ if (shardCount) {
   targets = targets.filter((target) => selected.has(target));
 }
 if (values.list) {
-  console.log(JSON.stringify(explicitTargets ? forwarded : [...targets, ...forwarded], null, 2));
+  await promisify(process.stdout.write.bind(process.stdout))(
+    `${JSON.stringify(explicitTargets ? forwarded : [...targets, ...forwarded], null, 2)}\n`,
+  );
   process.exit(0);
 }
 

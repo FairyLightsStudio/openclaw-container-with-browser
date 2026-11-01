@@ -30,6 +30,7 @@ import {
   recordDeferredPluginMigrations,
   restorePluginCohortMigrationPublications,
 } from "./deferred-plugin-migrations.js";
+import { readUpdateDatabaseGenerationPair } from "./update-database-generations.js";
 import {
   decodePluginCohortRecovery,
   type PluginCohortRecovery,
@@ -39,7 +40,7 @@ import type { UpdateRecoveryRecord } from "./update-run-recovery-schema.js";
 import {
   beginPluginCohortRecovery,
   deletePluginCohortRecovery,
-  inspectPluginCohortRecoveries,
+  inspectPluginCohortRecoveriesAsync,
   loadPluginCohortRecovery,
   readPluginCohortRecoveryPairRows,
   writePluginCohortRecovery,
@@ -98,7 +99,25 @@ function setup() {
   return { options, reservation, cohort, rows };
 }
 
-it("reopens the paired intent, retains old-reader refusal and settles only its own rows", () => {
+it("preserves a released updater's SQLite capture before Doctor starts", async () => {
+  const f = setup();
+  await closeOpenClawStateDatabaseAsync();
+  const pathname = resolveOpenClawStateSqlitePath(f.options.env);
+  const before = readUpdateDatabaseGenerationPair([pathname]).physical;
+  await withPluginCohortConfigCapture(
+    {
+      ...f.options,
+      ...fence,
+      runId: f.cohort.runId,
+      installKey: f.cohort.installKey,
+    },
+    async () => {
+      expect(readUpdateDatabaseGenerationPair([pathname]).physical).toEqual(before);
+    },
+  );
+});
+
+it("reopens the paired intent, retains old-reader refusal and settles only its own rows", async () => {
   const f = setup();
   writeConfigMachineState("unrelated", { keep: true }, f.options);
   const pair = beginPluginCohortRecovery(f.reservation, f.cohort, fence, f.options);
@@ -117,7 +136,7 @@ it("reopens the paired intent, retains old-reader refusal and settles only its o
   expect(f.rows().find((row) => row.state_key.startsWith("update.recovery."))).toEqual(
     originalReservation,
   );
-  expect(inspectPluginCohortRecoveries(f.options)).toEqual([next]);
+  await expect(inspectPluginCohortRecoveriesAsync(f.options)).resolves.toEqual([next]);
   deletePluginCohortRecovery(next, fence, f.options);
   deletePluginCohortRecovery(next, fence, f.options);
   expect(loadPluginCohortRecovery(f.cohort.runId, f.options)).toBeUndefined();
@@ -159,7 +178,7 @@ it("refuses stale settlement and rolls back both rows if live ownership is lost"
   expect(loadPluginCohortRecovery(f.cohort.runId, f.options)).toEqual(next);
 });
 
-it("refuses partial, mismatched and full-state pairs without changing retained evidence", () => {
+it("refuses partial, mismatched and full-state pairs without changing retained evidence", async () => {
   const f = setup();
   const pair = beginPluginCohortRecovery(f.reservation, f.cohort, fence, f.options);
   expect(() =>
@@ -178,7 +197,9 @@ it("refuses partial, mismatched and full-state pairs without changing retained e
     },
     f.options,
   );
-  expect(() => inspectPluginCohortRecoveries(f.options)).toThrow("match its reservation");
+  await expect(inspectPluginCohortRecoveriesAsync(f.options)).rejects.toThrow(
+    "match its reservation",
+  );
   writeConfigMachineState(
     "update.recovery." + f.cohort.runId,
     {
