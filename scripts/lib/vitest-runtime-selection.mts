@@ -16,10 +16,10 @@ import type { VitestWorkerPreset } from "./vitest-worker-descriptor.mts";
 export const TUI_PTY_BUILT_CLI_CANARY_PATTERN =
   "launches openclaw chat as local mode through a real PTY";
 
-// These built-CLI proofs still read source owners, but their only compiled
-// declarations belong to the production runtime registry.
-const runtimeOnlyBuiltCliFiles = new Set([
+// These E2E proofs need only production declarations in compiled workers.
+const runtimeOnlyE2eFiles = new Set([
   "extensions/browser/src/browser/extension-install.native-host.e2e.test.ts",
+  "src/agents/bash-tools.exec-gateway-approval.e2e.test.ts",
   "test/e2e/qa-lab/plugins/discord-show-widget-contextual-presenter.e2e.test.ts",
   "test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts",
   "test/scripts/sqlite-sessions-transcripts-flip-proof.built-cli.e2e.test.ts",
@@ -62,6 +62,8 @@ const runtimeOnlyUnitFiles = new Set([
   "src/gateway/server-methods/session-catalog-privacy.test.ts",
   "src/gateway/server-methods/sessions-lifecycle-dormant.test.ts",
   "src/gateway/server.beam-owned-view.test.ts",
+  "src/gateway/server.plugin-reload-send-continuation.product.test.ts",
+  "src/gateway/server.plugin-reload-send-revocation.product.test.ts",
   "src/gateway/server.subagent-transcript-conflict.test.ts",
   "src/gateway/session-row-projection.subagent-index.test.ts",
   "src/gateway/session-subagent-resume.test.ts",
@@ -182,7 +184,12 @@ export function resolveCiVitestWorkerPreset(
           ),
     );
   return selectVitestWorkerPreset(
-    supports(areRuntimeOnlyVitestUnitFiles, shouldUseRuntimeOnlyVitestWorkers),
+    supports(
+      (files) =>
+        files.length > 0 &&
+        files.every((file) => runtimeOnlyUnitFiles.has(file) || runtimeOnlyE2eFiles.has(file)),
+      shouldUseRuntimeOnlyVitestWorkers,
+    ),
     supports(areToolingOnlyVitestUnitFiles, shouldUseToolingOnlyVitestWorkers),
   );
 }
@@ -238,7 +245,7 @@ export function shouldUseRuntimeOnlyVitestWorkers(
     return false;
   }
   if (config === "test/vitest/vitest.e2e.config.ts") {
-    return files.every((file) => runtimeOnlyBuiltCliFiles.has(file));
+    return files.every((file) => runtimeOnlyE2eFiles.has(file));
   }
   if (
     (config === "test/vitest/vitest.agents-core.config.ts" ||
