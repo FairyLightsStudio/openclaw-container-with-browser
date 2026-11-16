@@ -38,7 +38,13 @@ without known dimensions keep a 3:2 frame while displayed, with the full image
 fitted inside it. Previously learned dimensions size the next preview without
 moving the surrounding messages when the image decodes.
 
-Opening a transcript image or video shows a shared viewer for supported media in
+Uploaded videos show a thumbnail or a compact Play card in chat. Choose **Play**
+to load the player in place; scrolling past a video does not prepare or convert
+it for playback. The player’s expand action opens the larger media viewer and
+pauses inline playback. Leaving the conversation releases the player. If your
+browser blocks automatic playback after conversion, use the player’s Play control.
+
+Opening a transcript image or expanding a video shows a shared viewer for supported media in
 the loaded thread, including inline Markdown images, your own attachments, and
 earlier response turns.
 When more than one item is available, use the visible previous/next buttons,
@@ -287,6 +293,8 @@ The saved sidebar also retains the session rows for its initial viewport, along 
 The Online sidebar loads people's open and running session counts when you open it. Switching to Sessions or Pages stops those count refreshes; opening Online again loads current counts. Restoring a Sessions sidebar does not wait for Online counts.
 
 Message reactions appear in a compact tab on the message bubble. Flat agent replies have no bubble, so their tab leads the row under the reply and stays in place while the name, time and actions appear on hover. Open the tab to see each emoji count, including in read-only sessions. Desktop Chat Details lists automations after session information and task progress so arriving automation results keep those sections in place. The mobile composer reserves one activity row so arriving task and subagent status does not move the transcript.
+
+**Skills used** in Chat Details lists successful skill loads from the conversation’s complete current history and live tool activity, including skills loaded through Code Mode. The section starts collapsed; repeated loads increase the count beside the skill rather than adding duplicate rows.
 
 The desktop **Subagents** tab places nested subagents beneath the subagent that started them. Each row keeps its own activity and controls. Floating **Details** and the mobile list remain compact, direct-child views.
 

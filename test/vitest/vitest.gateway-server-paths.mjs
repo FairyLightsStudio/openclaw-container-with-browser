@@ -74,7 +74,6 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/gateway.continuation-skip-bootstrap.integration.test.ts",
   "src/gateway/github-personal-publication-outcomes.test.ts",
   "src/gateway/github-personal-publication.lifecycle.test.ts",
-  "src/gateway/github-personal-publication.test.ts",
   "src/gateway/github-pr-attribution.test.ts",
   "src/gateway/github-pr-workspace-acquisition.test.ts",
   "src/gateway/github-pr-workspace-preparation.test.ts",
@@ -337,6 +336,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/session-transcript-title-reader.test.ts",
   "src/gateway/session-utils-read-lifetime.test.ts",
   "src/gateway/session-utils-store-lookup.test.ts",
+  "src/gateway/session-utils-store-sources.test.ts",
   "src/gateway/session-utils.agent-models.test.ts",
   "src/gateway/session-utils.deleted-agent.test.ts",
   "src/gateway/session-utils.permissions.test.ts",
@@ -349,6 +349,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/session-utils.subagent-payloads.test.ts",
   "src/gateway/session-utils.subagent.test.ts",
   "src/gateway/session-utils.test.ts",
+  "src/gateway/sessions-history-http.membership.test.ts",
   "src/gateway/sessions-history-http.model-policy.test.ts",
   "src/gateway/sessions-history-http.physical-source.test.ts",
   "src/gateway/sessions-resolve-store.test.ts",
@@ -368,6 +369,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/talk/handlers/client-native-replay.test.ts",
   "src/gateway/talk/handlers/client-native-speech.test.ts",
   "src/gateway/talk/handlers/client.test.ts",
+  "src/gateway/talk/handlers/index.test.ts",
   "src/gateway/talk/handlers/native-consult-target.test.ts",
   "src/gateway/talk/handlers/voice.test.ts",
   "src/gateway/talk/relay-audio-base64.test.ts",
@@ -406,6 +408,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/live-events-settlement.test.ts",
   "src/gateway/worker-environments/live-events.test.ts",
   "src/gateway/worker-environments/local-workspace-conversion.test.ts",
+  "src/gateway/worker-environments/local-workspace-diagnostics.test.ts",
   "src/gateway/worker-environments/local-workspace-projection.test.ts",
   "src/gateway/worker-environments/local-workspace-store.test.ts",
   "src/gateway/worker-environments/local-workspace-template.test.ts",
@@ -620,6 +623,8 @@ export const gatewayClientTestExclude = [
 export const gatewayServerSerialTestFiles = [
   "src/gateway/server.sessions.fixture-lifecycle.test.ts",
   "src/gateway/server.startup-fixture-lifetime.test.ts",
+  "src/gateway/server.plugin-reload-send-continuation.product.test.ts",
+  "src/gateway/server.plugin-reload-send-revocation.product.test.ts",
 ];
 
 // Canonical file ownership for the non-isolated Gateway server Vitest project.
