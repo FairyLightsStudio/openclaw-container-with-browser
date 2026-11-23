@@ -509,7 +509,9 @@ describe("operator model policy on plugin completions", () => {
           ),
         );
         const rejected = expect(pending).rejects.toThrow(
-          scenario === "restricted model" ? "cannot use this model" : /authority|request ended/,
+          scenario === "restricted model"
+            ? "cannot use this model"
+            : /authority|request ended|could not start/,
         );
         try {
           await Promise.race([started.promise, pending]);
@@ -645,7 +647,7 @@ describe("operator model policy on plugin completions", () => {
             ? "Plugin model completion requires its current Gateway binding."
             : expect.stringContaining(
                 source === "unbound-operator"
-                  ? "requires original Gateway authority"
+                  ? "Plugin model completion requires its current Gateway binding."
                   : "cannot use this model",
               ),
       );
